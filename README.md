@@ -1,4 +1,6 @@
-# VTest - The HTTP test-program formerly known as Varnishtest
+# VTest 
+
+# The HTTP test-program formerly known as Varnishtest
 
 This project is the (almost) unvarnished varnishtest program, made
 available as a stand-alone program because it can be used to test

@@ -1,3 +1,5 @@
+# Collection Copyright
+
 BSD 2-Clause License
 
 Copyright (c) 2018, Vtest project
@@ -23,3 +25,13 @@ SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
 CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# File Copyrights
+
+All files have some variant of BSD 2-Clause License, except:
+
+* lib/vqueue.h - BSD 3-Clause License
+* src/huffman_input - BSD 3-Clause License
+* src/vtc_h2_enctbl.h - BSD 3-Clause License
+* src/vtc_h2_stattbl.h - BSD 3-Clause License
+

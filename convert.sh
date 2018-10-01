@@ -5,11 +5,7 @@ set -e
 S=/home/phk/Varnish/trunk/varnish-cache
 T=/home/phk/Varnish/trunk/varnish-cache/bin/varnishtest/tests
 
-chflags -R noschg vtest
-rm -rf vtest
-mkdir vtest
-
-mkdir vtest/lib
+mkdir -p lib
 cp \
 	${S}/include/vdef.h \
 	${S}/include/miniobj.h \
@@ -36,43 +32,43 @@ cp \
 	${S}/include/vtcp.h		${S}/lib/libvarnish/vtcp.c \
 	${S}/include/vtim.h		${S}/lib/libvarnish/vtim.c \
 	${S}/include/vus.h		${S}/lib/libvarnish/vus.c \
-	vtest/lib
+	lib
 
-mkdir vtest/src
+mkdir -p src
 cp \
 	${S}/bin/varnishtest/*.[ch] \
 	${S}/bin/varnishtest/gensequences \
 	${S}/bin/varnishtest/sequences \
 	${S}/bin/varnishtest/huffman_input \
 	${S}/bin/varnishtest/huffman_gen.py \
-	vtest/src
+	src
 
-rm -f vtest/src/teken_state.h
-rm -f vtest/src/vtc_h2_dectbl.h
+rm -f src/teken_state.h
+rm -f src/vtc_h2_dectbl.h
 
-mkdir vtest/src/tbl
+mkdir -p src/tbl
 cp \
 	${S}/include/tbl/h2*.h \
 	${S}/include/tbl/vhp_huffman.h \
 	${S}/include/tbl/vsl_tags.h \
 	${S}/include/tbl/vsl_tags_http.h \
-	vtest/src/tbl
+	src/tbl
 
 
-mkdir vtest/tests
+mkdir -p tests
 for i in ${T}/a*.vtc
 do
-	sed -e 's/varnishtest/vtest/g' $i > vtest/tests/`basename $i`
+	sed -e 's/varnishtest/vtest/g' $i > tests/`basename $i`
 done
 
-sed -i '' -e 's/vgz.h/zlib.h/' vtest/src/vtc_http.c
+sed -i '' -e 's/vgz.h/zlib.h/' src/vtc_http.c
 
 echo '
 #define HAVE_CLOCK_GETTIME 1
 #define HAVE_NANOSLEEP 1
 #define HAVE_STATVFS_H 1
 #define HAVE_SYS_MOUNT_H 1
-' > vtest/src/config.h
+' > src/config.h
 
 (
 	echo '#'
@@ -113,9 +109,8 @@ echo '
 	echo '	rm -f vtest'
 	echo '	rm -f src/teken_state.h'
 	echo '	rm -f src/vtc_h2_dectbl.h'
-) > vtest/Makefile
+) > Makefile
 
-cd vtest 
 gsrc '^' | wc -l
 make
 make test

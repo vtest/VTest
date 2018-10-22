@@ -9,9 +9,9 @@ vtest: \
 		src/*.[ch] \
 		src/tbl/*.h \
 		src/sequences src/gensequences \
-		src/huffman_gen.py src/tbl/vhp_huffman.h
+		huffman_gen.py src/tbl/vhp_huffman.h
 	awk -f src/gensequences src/sequences > src/teken_state.h
-	python3 src/huffman_gen.py src/tbl/vhp_huffman.h > src/vtc_h2_dectbl.h
+	python3 huffman_gen.py src/tbl/vhp_huffman.h > src/vtc_h2_dectbl.h
 	${CC} \
 		-o vtest \
 		-I src \

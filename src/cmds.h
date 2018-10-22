@@ -44,12 +44,16 @@ CMD_TOP(client)
 CMD_TOP(err_shell)
 CMD_TOP(feature)
 CMD_TOP(haproxy)
+#ifdef HAVE_VAPI
 CMD_TOP(logexpect)
+#endif
 CMD_TOP(process)
 CMD_TOP(server)
 CMD_TOP(setenv)
 CMD_TOP(syslog)
+#ifdef HAVE_VAPI
 CMD_TOP(varnish)
+#endif
 CMD_TOP(varnishtest)
 CMD_TOP(vtest)
 #undef CMD_TOP

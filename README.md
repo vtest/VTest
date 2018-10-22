@@ -20,7 +20,7 @@ script over a Varnish-Cache trunk tree rev 7161dcf9d9f5380ffd.
 * Detect content of config.h as required
 
 * Compile vtc_varnish.c and vtc_logexpect.c only if we can find
-  a libvarnishapi installed on the system.
+  a libvarnishapi installed on the system. (done for meson)
 
 # NOT-TODO:
 

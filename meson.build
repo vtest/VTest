@@ -5,13 +5,12 @@ incdir = include_directories(['lib', 'src'])
 c = meson.get_compiler('c')
 c_args = []
 foreach h : ['sys/statvfs.h', 'sys/vfs.h', 'sys/mount.h']
-  if c.has_header(h)
-    c_args += '-DHAVE_@0@'.format(h.to_upper().underscorify())
-  endif
+	if c.has_header(h)
+		c_args += '-DHAVE_@0@'.format(h.to_upper().underscorify())
+	endif
 endforeach
 
 libs = [
-	dependency('varnishapi'),
 	dependency('threads'),
 	dependency('libpcre'),
 	c.find_library('m'),
@@ -68,11 +67,16 @@ src = [
 	'src/vtc_server.c',
 	'src/vtc_subr.c',
 	'src/vtc_syslog.c',
-	'src/vtc_logexp.c',
-	'src/vtc_varnish.c',
 	teken_hdrs,
 	h2tbl_hdr
 	]
+
+vapi_dep = dependency('varnishapi', required: false)
+if vapi_dep.found()
+	src += ['src/vtc_logexp.c',  'src/vtc_varnish.c']
+	libs += vapi_dep
+	c_args += '-DHAVE_VAPI'
+endif
 
 executable('varnishtest',
 	sources: src,

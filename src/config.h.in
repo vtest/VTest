@@ -3,4 +3,8 @@
 #define HAVE_NANOSLEEP 1
 #define HAVE_STATVFS_H 1
 #define HAVE_SYS_MOUNT_H 1
+#define _GNU_SOURCE
 
+#if defined (__linux)
+#define HAVE_SYS_VFS_H
+#endif

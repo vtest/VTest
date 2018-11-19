@@ -36,6 +36,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <strings.h>
 
 #include "vtc.h"
 #include "vtc_http.h"

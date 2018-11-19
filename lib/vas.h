@@ -38,6 +38,8 @@
 #ifndef VAS_H_INCLUDED
 #define VAS_H_INCLUDED
 
+#include <errno.h>
+
 enum vas_e {
 	VAS_WRONG,
 	VAS_MISSING,
@@ -87,5 +89,27 @@ do {									\
 	VAS_Fail(__func__, __FILE__, __LINE__,				\
 	    "", VAS_INCOMPLETE);					\
 } while (0)
+
+/*
+ * Most of this nightmare is stolen from FreeBSD's <cdefs.h>
+ */
+#ifndef __has_extension
+#  define __has_extension(x)	0
+#endif
+
+#if __has_extension(c_static_assert)
+#   define v_static_assert _Static_assert
+#elif __GNUC_PREREQ__(4,6) && !defined(__cplusplus)
+#   define v_static_assert _Static_assert
+#else
+#   if defined(__COUNTER__)
+#	define v_static_assert(x, y)	__v_static_assert(x, __COUNTER__)
+#   else
+#	define v_static_assert(x, y)	__v_static_assert(x, __LINE__)
+#   endif
+#   define __v_static_assert(x, y)	___v_static_assert(x, y)
+#   define ___v_static_assert(x, y) \
+		typedef char __vassert_## y[(x) ? 1 : -1] v_unused_
+#endif
 
 #endif

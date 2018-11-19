@@ -5,6 +5,7 @@ VARNISH_SRC=/home/phk/Varnish/trunk/varnish-cache
 all: vtest
 
 vtest: \
+		config.h \
 		lib/*.[ch] \
 		src/*.[ch] \
 		src/tbl/*.h \
@@ -14,6 +15,7 @@ vtest: \
 	python3 src/huffman_gen.py src/tbl/vhp_huffman.h > src/vtc_h2_dectbl.h
 	${CC} \
 		-o vtest \
+		-I . \
 		-I src \
 		-I lib \
 		-I /usr/local/include \
@@ -28,6 +30,9 @@ vtest: \
 		-L${VARNISH_SRC}/lib/libvarnishapi/.libs \
 		-Wl,--rpath,${VARNISH_SRC}/lib/libvarnishapi/.libs \
 		-lvarnishapi
+
+config.h: src/config.h.in
+	cp $< $@
 
 test: vtest
 	env PATH=`pwd`:${PATH} vtest tests/*.vtc

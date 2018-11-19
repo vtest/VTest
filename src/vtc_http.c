@@ -42,7 +42,7 @@
 
 #include "vct.h"
 #include "vfil.h"
-#include "zlib.h"
+#include "vgz.h"
 #include "vnum.h"
 #include "vrnd.h"
 #include "vtcp.h"

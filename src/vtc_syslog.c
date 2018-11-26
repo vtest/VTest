@@ -38,10 +38,11 @@
 
 #include "vsa.h"
 #include "vss.h"
-#include "vtcp.h"
-#include "vre.h"
 
 #include "vtc.h"
+
+#include "vre.h"
+#include "vtcp.h"
 
 struct syslog_srv {
 	unsigned			magic;

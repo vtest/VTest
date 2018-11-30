@@ -2,8 +2,8 @@
 
 set -e
 
-S=/home/phk/Varnish/trunk/varnish-cache
-T=/home/phk/Varnish/trunk/varnish-cache/bin/varnishtest/tests
+S=${S:-/home/phk/Varnish/trunk/varnish-cache}
+T=${T:-/home/phk/Varnish/trunk/varnish-cache/bin/varnishtest/tests}
 
 mkdir -p lib
 cp \

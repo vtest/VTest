@@ -61,7 +61,7 @@ do
 	sed -e 's/varnishtest/vtest/g' $i > tests/`basename $i`
 done
 
-sed -i '' -e 's/vgz.h/zlib.h/' src/vtc_http.c
+sed -e 's/vgz.h/zlib.h/' -i src/vtc_http.c
 
 echo '
 #define HAVE_CLOCK_GETTIME 1

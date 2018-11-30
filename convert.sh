@@ -36,6 +36,7 @@ cp \
 
 mkdir -p src
 cp \
+	${S}/config.h \
 	${S}/bin/varnishtest/*.[ch] \
 	${S}/bin/varnishtest/gensequences \
 	${S}/bin/varnishtest/sequences \
@@ -62,13 +63,6 @@ do
 done
 
 sed -e 's/vgz.h/zlib.h/' -i src/vtc_http.c
-
-echo '
-#define HAVE_CLOCK_GETTIME 1
-#define HAVE_NANOSLEEP 1
-#define HAVE_STATVFS_H 1
-#define HAVE_SYS_MOUNT_H 1
-' > src/config.h
 
 (
 	echo '#'

@@ -2,8 +2,8 @@
 
 set -e
 
-S=/home/phk/Varnish/trunk/varnish-cache
-T=/home/phk/Varnish/trunk/varnish-cache/bin/varnishtest/tests
+S=${S:-/home/phk/Varnish/trunk/varnish-cache}
+T=${T:-/home/phk/Varnish/trunk/varnish-cache/bin/varnishtest/tests}
 
 mkdir -p lib
 cp \
@@ -61,7 +61,10 @@ do
 	sed -e 's/varnishtest/vtest/g' $i > tests/`basename $i`
 done
 
-sed -i '' -e 's/vgz.h/zlib.h/' src/vtc_http.c
+# sed -i is not portable
+sed -e 's/vgz.h/zlib.h/' src/vtc_http.c > src/vtc_http.c_
+cat src/vtc_http.c_ > src/vtc_http.c
+rm -f src/vtc_http.c_
 
 echo '
 #define HAVE_CLOCK_GETTIME 1

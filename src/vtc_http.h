@@ -55,6 +55,8 @@ struct http {
 	int			gziplevel;
 	int			gzipresidual;
 
+	int			head_method;
+
 	int			fatal;
 
 	/* H/2 */

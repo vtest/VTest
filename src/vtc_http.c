@@ -606,7 +606,7 @@ http_swallow_body(struct http *hp, char * const *hh, int body)
 	p = http_find_header(hh, "content-length");
 	if (p != NULL) {
 		l = strtoul(p, NULL, 10);
-		if (http_rxchar(hp, l, 0) < 0)
+		if (http_rxchar(hp, l, hp->head_method) < 0)
 			return;
 		vtc_dump(hp->vl, 4, "body", hp->body, l);
 		hp->bodyl = l;
@@ -1253,6 +1253,7 @@ cmd_http_txreq(CMD_ARGS)
 			av++;
 		} else if (!strcmp(*av, "-req")) {
 			req = av[1];
+			hp->head_method = !strcasecmp(av[1], "HEAD") ;
 			av++;
 		} else if (!hp->sfd && !strcmp(*av, "-up")) {
 			up = av[1];

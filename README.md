@@ -12,9 +12,11 @@ Poul-Henning
 
 # BACKGROUND CORRESPONDENCE
 
-   Date:    Wed, 09 Jan 2019 10:36:14 +0000
-   From:    Poul-Henning Kamp <phk@phk.freebsd.dk>
-   Subject: Re: vtest status
+`Date:    Wed, 09 Jan 2019 10:36:14 +0000`
+
+`From:    Poul-Henning Kamp <phk@phk.freebsd.dk>`
+
+`Subject: Re: vtest status`
 
 Personally I am not very keen on turning vtest into a "real" project
 with releases, package-building and all that, because it would cause

@@ -1,5 +1,11 @@
 #
 
+PYTHON2	?=	python2
+PYTHON3	?=	python3
+PYTHON	?=	python
+
+AWK	?=	awk
+
 SRCS=	src/*.c \
 	lib/*.c
 
@@ -7,8 +13,8 @@ DEPS=	${SRCS} \
 	lib/*.h \
 	src/*.h \
 	src/tbl/*.h \
-	src/sequences src/gensequences \
-	src/huffman_gen.py src/tbl/vhp_huffman.h
+	src/teken_state.h \
+	src/vtc_h2_dectbl.h
 
 INCS=	-Isrc \
 	-Ilib \
@@ -24,8 +30,6 @@ LIBS=	-L/usr/local/lib \
 # If you want to build vtest without varnish support, use this part:
 
 vtest: ${DEPS}
-	awk -f src/gensequences src/sequences > src/teken_state.h
-	python3 src/huffman_gen.py src/tbl/vhp_huffman.h > src/vtc_h2_dectbl.h
 	${CC} \
 		-o vtest \
 		${INCS} \
@@ -35,15 +39,12 @@ vtest: ${DEPS}
 test: vtest
 	env PATH=`pwd`:${PATH} vtest tests/*.vtc
 
-
 #######################################################################
 # ... other point to varnish source tree and use this part:
 
 VARNISH_SRC=/home/phk/Varnish/trunk/varnish-cache
 
 varnishtest:	${DEPS}
-	awk -f src/gensequences src/sequences > src/teken_state.h
-	python3 src/huffman_gen.py src/tbl/vhp_huffman.h > src/vtc_h2_dectbl.h
 	${CC} \
 		-o varnishtest \
 		-DVTEST_WITH_VTC_VARNISH \
@@ -55,6 +56,24 @@ varnishtest:	${DEPS}
 		-L${VARNISH_SRC}/lib/libvarnishapi/.libs \
 		-Wl,--rpath,${VARNISH_SRC}/lib/libvarnishapi/.libs \
 		-lvarnishapi
+
+#######################################################################
+
+src/vtc_h2_dectbl.h:	src/huffman_gen.py src/tbl/vhp_huffman.h
+	@( echo trying python3 && \
+	${PYTHON3} src/huffman_gen.py src/tbl/vhp_huffman.h > $@ ) || \
+	( echo trying python2 instead && \
+	${PYTHON2} src/huffman_gen.py src/tbl/vhp_huffman.h > $@ ) || \
+	( echo trying python instead && \
+	${PYTHON} src/huffman_gen.py src/tbl/vhp_huffman.h > $@ ) || \
+	( echo failed && exit 1 )
+
+#######################################################################
+
+src/teken_state.h:	src/gensequences src/sequences
+	${AWK} -f src/gensequences src/sequences > src/teken_state.h
+
+#######################################################################
 
 clean:
 	rm -f vtest varnishtest

@@ -16,6 +16,8 @@ DEPS=	${SRCS} \
 	src/teken_state.h \
 	src/vtc_h2_dectbl.h
 
+FLAGS=	-O2 -s -Wall -Werror
+
 INCS=	-Isrc \
 	-Ilib \
 	-I/usr/local/include \
@@ -31,6 +33,7 @@ LIBS=	-L/usr/local/lib \
 
 vtest: ${DEPS}
 	${CC} \
+		${FLAGS} \
 		-o vtest \
 		${INCS} \
 		${SRCS} \
@@ -46,6 +49,7 @@ VARNISH_SRC=/home/phk/Varnish/trunk/varnish-cache
 
 varnishtest:	${DEPS}
 	${CC} \
+		${FLAGS} \
 		-o varnishtest \
 		-DVTEST_WITH_VTC_VARNISH \
 		-DVTEST_WITH_VTC_LOGEXPECT \

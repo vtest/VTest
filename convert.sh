@@ -54,6 +54,21 @@ cp \
 	${S}/include/tbl/vsl_tags_http.h \
 	src/tbl
 
+find src lib -name '*.[ch]' -print |
+while read f
+do
+	sed -i '' '
+	s/"verrno.h"/<errno.h>/
+	/typedef double vtim_/d
+	s/vtim_mono	/double		/
+	s/vtim_mono/double/g
+	s/vtim_real	/double		/
+	s/vtim_real/double/g
+	s/vtim_dur	/double		/
+	s/vtim_dur/double/g
+	' $f
+done
+
 
 mkdir -p tests
 for i in ${T}/a*.vtc
@@ -65,54 +80,6 @@ done
 sed -e 's/vgz.h/zlib.h/' src/vtc_http.c > src/vtc_http.c_
 cat src/vtc_http.c_ > src/vtc_http.c
 rm -f src/vtc_http.c_
-
-echo '
-#define HAVE_CLOCK_GETTIME 1
-#define HAVE_NANOSLEEP 1
-#define HAVE_STATVFS_H 1
-#define HAVE_SYS_MOUNT_H 1
-' > src/config.h
-
-(
-	echo '#'
-	echo ''
-	echo "VARNISH_SRC=${S}"
-	echo ''
-	echo 'all: vtest'
-	echo ''
-	echo 'vtest: \'
-	echo '		lib/*.[ch] \'
-	echo '		src/*.[ch] \'
-	echo '		src/tbl/*.h \'
-	echo '		src/sequences src/gensequences \'
-	echo '		src/huffman_gen.py src/tbl/vhp_huffman.h'
-	echo '	awk -f src/gensequences src/sequences > src/teken_state.h'
-	echo '	python3 src/huffman_gen.py src/tbl/vhp_huffman.h > src/vtc_h2_dectbl.h'
-	echo '	${CC} \'
-	echo '		-o vtest \'
-	echo '		-I src \'
-	echo '		-I lib \'
-	echo '		-I /usr/local/include \'
-	echo '		-I ${VARNISH_SRC}/include \'
-	echo '		-pthread \'
-	echo '		src/*.c \'
-	echo '		lib/*.c \'
-	echo '		-L /usr/local/lib \'
-	echo '		-lm \'
-	echo '		-lpcre \'
-	echo '		-lz \'
-	echo '		-L${VARNISH_SRC}/lib/libvarnishapi/.libs \'
-	echo '		-Wl,--rpath,${VARNISH_SRC}/lib/libvarnishapi/.libs \'
-	echo '		-lvarnishapi'
-	echo ''
-	echo 'test: vtest'
-	echo '	env PATH=`pwd`:${PATH} vtest tests/*.vtc'
-	echo ''
-	echo 'clean:'
-	echo '	rm -f vtest'
-	echo '	rm -f src/teken_state.h'
-	echo '	rm -f src/vtc_h2_dectbl.h'
-) > Makefile
 
 gsrc '^' | wc -l
 make

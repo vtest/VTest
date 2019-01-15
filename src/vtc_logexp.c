@@ -67,6 +67,8 @@
  * \-q query
  *         Filter records using a query expression, see ``man vsl-query`` for
  *         more information.
+ * \-m
+ *	   Also emit log records for misses (only for debugging)
  *
  * \-start
  *         Start the logexpect thread in the background.
@@ -118,10 +120,11 @@
 
 #include "vapi/vsm.h"
 #include "vapi/vsl.h"
-#include "vtim.h"
-#include "vre.h"
 
 #include "vtc.h"
+
+#include "vtim.h"
+#include "vre.h"
 
 #define LE_ANY  (-1)
 #define LE_LAST (-2)
@@ -154,6 +157,7 @@ struct logexp {
 	int				vxid_last;
 	int				tag_last;
 
+	int				m_arg;
 	int				d_arg;
 	enum VSL_grouping_e		g_arg;
 	char				*query;
@@ -309,6 +313,8 @@ logexp_dispatch(struct VSL_data *vsl, struct VSL_transaction * const pt[],
 
 			if (ok)
 				legend = "match";
+			else if (skip && le->m_arg)
+				legend = "miss";
 			else if (skip)
 				legend = NULL;
 			else
@@ -596,6 +602,10 @@ cmd_logexpect(CMD_ARGS)
 				vtc_fatal(le->vl, "Missing -q argument");
 			REPLACE(le->query, av[1]);
 			av++;
+			continue;
+		}
+		if (!strcmp(*av, "-m")) {
+			le->m_arg = !le->m_arg;
 			continue;
 		}
 		if (!strcmp(*av, "-start")) {

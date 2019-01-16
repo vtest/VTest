@@ -109,6 +109,8 @@ struct haproxy_cli {
 	double			timeout;
 };
 
+static void haproxy_write_conf(struct haproxy *h);
+
 /**********************************************************************
  * Socket connect (same as client_tcp_connect()).
  */
@@ -583,6 +585,8 @@ haproxy_start(struct haproxy *h)
 		h->expect_exit = HAPROXY_EXPECT_EXIT;
 	}
 
+	haproxy_write_conf(h);
+
 	AZ(pipe(&h->fds[0]));
 	vtc_log(h->vl, 4, "XXX %d @%d", h->fds[1], __LINE__);
 	AZ(pipe(&h->fds[2]));
@@ -771,22 +775,19 @@ haproxy_store_conf(struct haproxy *h, const char *cfg, int auto_be)
 	h->cfg_vsb = macro_expand(h->vl, VSB_data(vsb));
 	AN(h->cfg_vsb);
 
-	vtc_dump(h->vl, 4, "conf", VSB_data(h->cfg_vsb), VSB_len(h->cfg_vsb));
-
 	VSB_destroy(&vsb2);
 	VSB_destroy(&vsb);
 }
 
 static void
-haproxy_write_conf(struct haproxy *h, const char *cfg, int auto_be)
+haproxy_write_conf(struct haproxy *h)
 {
 	struct vsb *vsb;
-
-	haproxy_store_conf(h, cfg, auto_be);
 
 	vsb = macro_expand(h->vl, VSB_data(h->cfg_vsb));
 	AN(vsb);
 
+	vtc_dump(h->vl, 4, "conf", VSB_data(vsb), VSB_len(vsb));
 	if (VFIL_writefile(h->workdir, h->cfg_fn,
 	    VSB_data(vsb), VSB_len(vsb)) != 0)
 		vtc_fatal(h->vl,
@@ -894,7 +895,7 @@ cmd_haproxy(CMD_ARGS)
 
 		if (!strcmp(*av, "-conf-OK")) {
 			AN(av[1]);
-			haproxy_write_conf(h, av[1], 0);
+			haproxy_store_conf(h, av[1], 0);
 			av++;
 			haproxy_check_conf(h, HAPROXY_GOOD_CONF);
 			continue;
@@ -902,7 +903,7 @@ cmd_haproxy(CMD_ARGS)
 		if (!strcmp(*av, "-conf-BAD")) {
 			AN(av[1]);
 			AN(av[2]);
-			haproxy_write_conf(h, av[2], 0);
+			haproxy_store_conf(h, av[2], 0);
 			h->expect_exit = 1;
 			haproxy_check_conf(h, av[1]);
 			av += 2;
@@ -936,13 +937,13 @@ cmd_haproxy(CMD_ARGS)
 		}
 		if (!strcmp(*av, "-conf")) {
 			AN(av[1]);
-			haproxy_write_conf(h, av[1], 0);
+			haproxy_store_conf(h, av[1], 0);
 			av++;
 			continue;
 		}
 		if (!strcmp(*av, "-conf+backend")) {
 			AN(av[1]);
-			haproxy_write_conf(h, av[1], 1);
+			haproxy_store_conf(h, av[1], 1);
 			av++;
 			continue;
 		}

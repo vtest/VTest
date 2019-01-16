@@ -70,6 +70,7 @@ struct haproxy {
 	pid_t			ppid;
 	int			fds[4];
 	char			*cfg_fn;
+	struct vsb		*cfg_vsb;
 
 	pthread_t		tp;
 	int			expect_exit;
@@ -745,9 +746,9 @@ haproxy_check_conf(struct haproxy *h, const char *expect)
  */
 
 static void
-haproxy_write_conf(const struct haproxy *h, const char *cfg, int auto_be)
+haproxy_store_conf(struct haproxy *h, const char *cfg, int auto_be)
 {
-	struct vsb *vsb, *vsb2, *vsb3;
+	struct vsb *vsb, *vsb2;
 
 	vsb = VSB_new_auto();
 	AN(vsb);
@@ -767,19 +768,31 @@ haproxy_write_conf(const struct haproxy *h, const char *cfg, int auto_be)
 
 	AZ(haproxy_build_backends(h, VSB_data(vsb)));
 
-	vsb3 = macro_expand(h->vl, VSB_data(vsb));
-	AN(vsb3);
+	h->cfg_vsb = macro_expand(h->vl, VSB_data(vsb));
+	AN(h->cfg_vsb);
+
+	vtc_dump(h->vl, 4, "conf", VSB_data(h->cfg_vsb), VSB_len(h->cfg_vsb));
+
+	VSB_destroy(&vsb2);
+	VSB_destroy(&vsb);
+}
+
+static void
+haproxy_write_conf(struct haproxy *h, const char *cfg, int auto_be)
+{
+	struct vsb *vsb;
+
+	haproxy_store_conf(h, cfg, auto_be);
+
+	vsb = macro_expand(h->vl, VSB_data(h->cfg_vsb));
+	AN(vsb);
 
 	if (VFIL_writefile(h->workdir, h->cfg_fn,
-	    VSB_data(vsb3), VSB_len(vsb3)) != 0)
+	    VSB_data(vsb), VSB_len(vsb)) != 0)
 		vtc_fatal(h->vl,
 		    "failed to write haproxy configuration file: %s (%d)",
 		    strerror(errno), errno);
 
-	vtc_dump(h->vl, 4, "conf", VSB_data(vsb3), VSB_len(vsb3));
-
-	VSB_destroy(&vsb3);
-	VSB_destroy(&vsb2);
 	VSB_destroy(&vsb);
 }
 

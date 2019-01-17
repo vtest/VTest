@@ -52,6 +52,11 @@
 #define HAPROXY_EXPECT_EXIT	(128 + HAPROXY_SIGNAL)
 #define HAPROXY_GOOD_CONF	"Configuration file is valid"
 
+struct envar {
+	VTAILQ_ENTRY(envar) list;
+	char *name;
+	char *value;
+};
 
 struct haproxy {
 	unsigned		magic;
@@ -84,6 +89,7 @@ struct haproxy {
 
 	char			*workdir;
 	struct vsb		*msgs;
+	VTAILQ_HEAD(,envar) envars;
 };
 
 static VTAILQ_HEAD(, haproxy)	haproxies =
@@ -110,6 +116,45 @@ struct haproxy_cli {
 };
 
 static void haproxy_write_conf(struct haproxy *h);
+
+static void
+haproxy_add_envar(struct haproxy *h,
+                  const char *name, const char *value)
+{
+	struct envar *e;
+
+	e = malloc(sizeof *e);
+	AN(e);
+	e->name = strdup(name);
+	e->value = strdup(value);
+	AN(e->name);
+	AN(e->value);
+	VTAILQ_INSERT_TAIL(&h->envars, e, list);
+}
+
+static void
+haproxy_delete_envars(struct haproxy *h)
+{
+	struct envar *e, *e2;
+	VTAILQ_FOREACH_SAFE(e, &h->envars, list, e2) {
+		VTAILQ_REMOVE(&h->envars, e, list);
+		free(e->name);
+		free(e->value);
+		free(e);
+	}
+}
+
+static void
+haproxy_build_env(struct haproxy *h)
+{
+	struct envar *e;
+
+	VTAILQ_FOREACH(e, &h->envars, list) {
+		if (setenv(e->name, e->value, 0) == -1)
+			vtc_fatal(h->vl, "setenv() failed: %s (%d)",
+				  strerror(errno), errno);
+	}
+}
 
 /**********************************************************************
  * Socket connect (same as client_tcp_connect()).
@@ -484,6 +529,7 @@ haproxy_new(const char *name)
 	bprintf(buf, "rm -rf \"%s\" ; mkdir -p \"%s\"", h->workdir, h->workdir);
 	AZ(system(buf));
 
+	VTAILQ_INIT(&h->envars);
 	VTAILQ_INSERT_TAIL(&haproxies, h, list);
 
 	return (h);
@@ -593,6 +639,8 @@ haproxy_start(struct haproxy *h)
 	h->pid = h->ppid = fork();
 	assert(h->pid >= 0);
 	if (h->pid == 0) {
+		haproxy_build_env(h);
+		haproxy_delete_envars(h);
 		AZ(chdir(h->name));
 		AZ(dup2(h->fds[0], 0));
 		assert(dup2(h->fds[3], 1) == 1);
@@ -681,7 +729,7 @@ haproxy_wait(struct haproxy *h)
 #define HAPROXY_BE_FD_STRLEN  strlen(HAPROXY_BE_FD_STR)
 
 static int
-haproxy_build_backends(const struct haproxy *h, const char *vsb_data)
+haproxy_build_backends(struct haproxy *h, const char *vsb_data)
 {
 	char *s, *p, *q;
 
@@ -720,9 +768,7 @@ haproxy_build_backends(const struct haproxy *h, const char *vsb_data)
 
 		bprintf(buf, "%d", sock);
 		vtc_log(h->vl, 4, "setenv(%s, %s)", p, buf);
-		if (setenv(p, buf, 0) == -1)
-			vtc_fatal(h->vl, "setenv() failed: %s (%d)",
-				  strerror(errno), errno);
+		haproxy_add_envar(h, p, buf);
 		p = q;
 	}
 	free(s);

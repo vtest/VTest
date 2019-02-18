@@ -53,6 +53,17 @@
 
 static const char *argv0;
 
+struct buf {
+	unsigned		magic;
+#define BUF_MAGIC		0x39d1258a
+	VTAILQ_ENTRY(buf)	list;
+	char			*buf;
+	struct vsb		*diag;
+	size_t			bufsiz;
+};
+
+static VTAILQ_HEAD(, buf) free_bufs = VTAILQ_HEAD_INITIALIZER(free_bufs);
+
 struct vtc_tst {
 	unsigned		magic;
 #define TST_MAGIC		0x618d8b88
@@ -69,13 +80,12 @@ struct vtc_job {
 	pid_t			child;
 	struct vev		*ev;
 	struct vev		*evt;
-	char			*buf;
+	struct buf		*bp;
 	char			*tmpdir;
-	unsigned		bufsiz;
 	double			t0;
-	struct vsb		*diag;
 	int			killed;
 };
+
 
 int iflg = 0;
 unsigned vtc_maxdur = 60;
@@ -96,6 +106,43 @@ char *vmod_path = NULL;
 struct vsb *params_vsb = NULL;
 int leave_temp;
 int vtc_witness = 0;
+static struct vsb *cbvsb;
+
+static int cleaner_fd = -1;
+static pid_t cleaner_pid;
+
+static struct buf *
+get_buf(void)
+{
+	struct buf *bp;
+
+	bp = VTAILQ_FIRST(&free_bufs);
+	CHECK_OBJ_ORNULL(bp, BUF_MAGIC);
+	if (bp != NULL) {
+		VTAILQ_REMOVE(&free_bufs, bp, list);
+		VSB_clear(bp->diag);
+	} else {
+		ALLOC_OBJ(bp, BUF_MAGIC);
+		AN(bp);
+		bp->bufsiz = vtc_bufsiz;
+		bp->buf = mmap(NULL, bp->bufsiz, PROT_READ|PROT_WRITE,
+		    MAP_ANON | MAP_SHARED, -1, 0);
+		assert(bp->buf != MAP_FAILED);
+		bp->diag = VSB_new_auto();
+		AN(bp->diag);
+	}
+	memset(bp->buf, 0, bp->bufsiz);
+	return (bp);
+}
+
+static void
+rel_buf(struct buf **bp)
+{
+	CHECK_OBJ_NOTNULL(*bp, BUF_MAGIC);
+
+	VTAILQ_INSERT_HEAD(&free_bufs, (*bp), list);
+	*bp = NULL;
+}
 
 /**********************************************************************
  * Parse a -D option argument into a name/val pair, and insert
@@ -128,6 +175,7 @@ usage(void)
 #define FMT "    %-28s # %s\n"
 	fprintf(stderr, FMT, "-b size",
 	    "Set internal buffer size (default: 1M)");
+	fprintf(stderr, FMT, "-C", "Use cleaner subprocess");
 	fprintf(stderr, FMT, "-D name=val", "Define macro");
 	fprintf(stderr, FMT, "-i", "Find varnish binaries in build tree");
 	fprintf(stderr, FMT, "-j jobs", "Run this many tests in parallel");
@@ -141,6 +189,87 @@ usage(void)
 	fprintf(stderr, FMT, "-v", "Verbose mode: always report test log");
 	fprintf(stderr, FMT, "-W", "Enable the witness facility for locking");
 	exit(1);
+}
+
+/**********************************************************************
+ * When running many tests, cleaning the tmpdir with "rm -rf" becomes
+ * chore which limits our performance.
+ * When the number of tests are above 100, we spawn a child-process
+ * to do that for us.
+ */
+
+static void
+cleaner_do(const char *dirname)
+{
+	char buf[BUFSIZ];
+
+	AZ(memcmp(dirname, tmppath, strlen(tmppath)));
+	if (cleaner_pid > 0) {
+		bprintf(buf, "%s\n", dirname);
+		assert(write(cleaner_fd, buf, strlen(buf)) == strlen(buf));
+		return;
+	}
+	bprintf(buf, "exec /bin/rm -rf %s\n", dirname);
+	AZ(system(buf));
+}
+
+static void
+cleaner_setup(void)
+{
+	int p[2], st;
+	char buf[BUFSIZ];
+	char *q;
+	pid_t pp;
+
+	AZ(pipe(p));
+	assert(p[0] > STDERR_FILENO);
+	assert(p[1] > STDERR_FILENO);
+	cleaner_pid = fork();
+	assert(cleaner_pid >= 0);
+	if (cleaner_pid == 0) {
+		closefd(&p[1]);
+		AZ(nice(1));
+		setbuf(stdin, NULL);
+		AZ(dup2(p[0], STDIN_FILENO));
+		while (fgets(buf, sizeof buf, stdin)) {
+			AZ(memcmp(buf, tmppath, strlen(tmppath)));
+			q = buf + strlen(buf);
+			assert(q > buf);
+			assert(q[-1] == '\n');
+			q[-1] = '\0';
+
+			/* Dont expend a shell on running /bin/rm */
+			pp = fork();
+			assert(pp >= 0);
+			if (pp == 0)
+				exit(execl(
+				    "/bin/rm", "rm", "-rf", buf, (char*)0));
+			assert(waitpid(pp, &st, 0) == pp);
+			AZ(st);
+		}
+		exit(0);
+	}
+	closefd(&p[0]);
+	cleaner_fd = p[1];
+}
+
+static void
+cleaner_neuter(void)
+{
+	if (cleaner_pid > 0)
+		closefd(&cleaner_fd);
+}
+
+static void
+cleaner_finish(void)
+{
+	int st;
+
+	if (cleaner_pid > 0) {
+		closefd(&cleaner_fd);
+		assert(waitpid(cleaner_pid, &st, 0) == cleaner_pid);
+		AZ(st);
+	}
 }
 
 /**********************************************************************
@@ -158,7 +287,6 @@ tst_cb(const struct vev *ve, int what)
 	double t;
 	FILE *f;
 	char *p;
-	struct vsb *v;
 
 	CAST_OBJ_NOTNULL(jp, ve->priv, JOB_MAGIC);
 
@@ -173,8 +301,9 @@ tst_cb(const struct vev *ve, int what)
 	*buf = '\0';
 	i = read(ve->fd, buf, sizeof buf);
 	if (i > 0)
-		VSB_bcat(jp->diag, buf, i);
+		VSB_bcat(jp->bp->diag, buf, i);
 	if (i == 0) {
+
 		njob--;
 		px = wait4(jp->child, &stx, 0, NULL);
 		assert(px == jp->child);
@@ -185,21 +314,20 @@ tst_cb(const struct vev *ve, int what)
 		if (ecode == 0)
 			ecode = WEXITSTATUS(stx);
 
-		AZ(VSB_finish(jp->diag));
-		v = VSB_new_auto();
-		AN(v);
-		VSB_cat(v, jp->buf);
-		p = strchr(jp->buf, '\0');
-		if (p > jp->buf && p[-1] != '\n')
-			VSB_putc(v, '\n');
-		VSB_quote_pfx(v, "*    diag  0.0 ",
-		    VSB_data(jp->diag), -1, VSB_QUOTE_NONL);
-		AZ(VSB_finish(v));
-		VSB_destroy(&jp->diag);
-		AZ(munmap(jp->buf, jp->bufsiz));
+		AZ(VSB_finish(jp->bp->diag));
+
+		VSB_clear(cbvsb);
+		VSB_cat(cbvsb, jp->bp->buf);
+		p = strchr(jp->bp->buf, '\0');
+		if (p > jp->bp->buf && p[-1] != '\n')
+			VSB_putc(cbvsb, '\n');
+		VSB_quote_pfx(cbvsb, "*    diag  0.0 ",
+		    VSB_data(jp->bp->diag), -1, VSB_QUOTE_NONL);
+		AZ(VSB_finish(cbvsb));
+		rel_buf(&jp->bp);
 
 		if ((ecode > 1 && vtc_verbosity) || vtc_verbosity > 1)
-			printf("%s", VSB_data(v));
+			printf("%s", VSB_data(cbvsb));
 
 		if (!ecode)
 			vtc_good++;
@@ -209,17 +337,15 @@ tst_cb(const struct vev *ve, int what)
 			vtc_fail++;
 
 		if (leave_temp == 0 || (leave_temp == 1 && ecode <= 1)) {
-			bprintf(buf, "rm -rf %s", jp->tmpdir);
-			AZ(system(buf));
+			cleaner_do(jp->tmpdir);
 		} else {
 			bprintf(buf, "%s/LOG", jp->tmpdir);
 			f = fopen(buf, "w");
 			AN(f);
-			(void)fprintf(f, "%s\n", VSB_data(v));
+			(void)fprintf(f, "%s\n", VSB_data(cbvsb));
 			AZ(fclose(f));
 		}
 		free(jp->tmpdir);
-		VSB_destroy(&v);
 
 		if (jp->killed)
 			printf("#    top  TEST %s TIMED OUT (kill -9)\n",
@@ -265,17 +391,8 @@ start_test(void)
 	ALLOC_OBJ(jp, JOB_MAGIC);
 	AN(jp);
 
-	jp->diag = VSB_new_auto();
-	AN(jp->diag);
+	jp->bp = get_buf();
 
-	jp->bufsiz = vtc_bufsiz;
-
-	jp->buf = mmap(NULL, jp->bufsiz, PROT_READ|PROT_WRITE,
-	    MAP_ANON | MAP_SHARED, -1, 0);
-	assert(jp->buf != MAP_FAILED);
-	memset(jp->buf, 0, jp->bufsiz);
-
-	VRND_SeedAll();
 	bprintf(tmpdir, "%s/vtc.%d.%08x", tmppath, (int)getpid(),
 		(unsigned)random());
 	AZ(mkdir(tmpdir, 0711));
@@ -285,7 +402,7 @@ start_test(void)
 	AN(tp->ntodo);
 	tp->ntodo--;
 	VTAILQ_REMOVE(&tst_head, tp, list);
-	if (tp->ntodo >0)
+	if (tp->ntodo > 0)
 		VTAILQ_INSERT_TAIL(&tst_head, tp, list);
 
 	jp->tst = tp;
@@ -299,13 +416,14 @@ start_test(void)
 	jp->child = fork();
 	assert(jp->child >= 0);
 	if (jp->child == 0) {
+		cleaner_neuter();	// Too dangerous to have around
 		AZ(setpgid(getpid(), 0));
 		VFIL_null_fd(STDIN_FILENO);
 		assert(dup2(p[1], STDOUT_FILENO) == STDOUT_FILENO);
 		assert(dup2(p[1], STDERR_FILENO) == STDERR_FILENO);
 		VSUB_closefrom(STDERR_FILENO + 1);
 		retval = exec_file(jp->tst->filename, jp->tst->script,
-		    jp->tmpdir, jp->buf, jp->bufsiz);
+		    jp->tmpdir, jp->bp->buf, jp->bp->bufsiz);
 		exit(retval);
 	}
 	closefd(&p[1]);
@@ -541,6 +659,8 @@ main(int argc, char * const *argv)
 {
 	int ch, i;
 	int ntest = 1;			/* Run tests this many times */
+	int nstart = 0;
+	int use_cleaner = 0;
 	uintmax_t bufsiz;
 	const char *p;
 
@@ -568,9 +688,12 @@ main(int argc, char * const *argv)
 	if (p != NULL)
 		vtc_maxdur = atoi(p);
 
+	VRND_SeedAll();
+	cbvsb = VSB_new_auto();
+	AN(cbvsb);
 	setbuf(stdout, NULL);
 	setbuf(stderr, NULL);
-	while ((ch = getopt(argc, argv, "b:D:hij:kLln:p:qt:vW")) != -1) {
+	while ((ch = getopt(argc, argv, "b:CD:hij:kLln:p:qt:vW")) != -1) {
 		switch (ch) {
 		case 'b':
 			if (VNUM_2bytes(optarg, &bufsiz, 0)) {
@@ -584,6 +707,9 @@ main(int argc, char * const *argv)
 				exit(2);
 			}
 			vtc_bufsiz = (unsigned)bufsiz;
+			break;
+		case 'C':
+			use_cleaner = !use_cleaner;
 			break;
 		case 'D':
 			if (!parse_D_opt(optarg)) {
@@ -654,19 +780,23 @@ main(int argc, char * const *argv)
 
 	vb = VEV_New();
 
+	if (use_cleaner)
+		cleaner_setup();
+
 	i = 0;
 	while (!VTAILQ_EMPTY(&tst_head) || i) {
 		if (!VTAILQ_EMPTY(&tst_head) && njob < npar) {
 			start_test();
 			njob++;
 			/* Stagger ramp-up */
-			if (njob < npar)
+			if (nstart++ < npar)
 				(void)usleep(random() % 100000L);
 			i = 1;
 			continue;
 		}
 		i = VEV_Once(vb);
 	}
+	cleaner_finish();
 	if (vtc_continue)
 		fprintf(stderr,
 		    "%d tests failed, %d tests skipped, %d tests passed\n",

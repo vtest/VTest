@@ -136,3 +136,8 @@
 #else
 #  define v_unused_
 #endif
+
+/* VTIM API overhaul WIP */
+typedef double vtim_mono;
+typedef double vtim_real;
+typedef double vtim_dur;

@@ -345,7 +345,7 @@ VTCP_close(int *s)
 }
 
 void
-VTCP_set_read_timeout(int s, double seconds)
+VTCP_set_read_timeout(int s, vtim_dur seconds)
 {
 #ifdef SO_RCVTIMEO_WORKS
 	struct timeval timeout;
@@ -377,7 +377,7 @@ vtcp_open_callback(void *priv, const struct suckaddr *sa)
 }
 
 int
-VTCP_open(const char *addr, const char *def_port, double timeout,
+VTCP_open(const char *addr, const char *def_port, vtim_dur timeout,
     const char **errp)
 {
 	int error;
@@ -592,7 +592,7 @@ VTCP_Check(int a)
  */
 
 int
-VTCP_read(int fd, void *ptr, size_t len, double tmo)
+VTCP_read(int fd, void *ptr, size_t len, vtim_dur tmo)
 {
 	struct pollfd pfd[1];
 	int i, j;

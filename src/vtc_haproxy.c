@@ -119,7 +119,7 @@ static void haproxy_write_conf(struct haproxy *h);
 
 static void
 haproxy_add_envar(struct haproxy *h,
-                  const char *name, const char *value)
+		  const char *name, const char *value)
 {
 	struct envar *e;
 

@@ -36,13 +36,13 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <zlib.h>
 
 #include "vtc.h"
 #include "vtc_http.h"
 
 #include "vct.h"
 #include "vfil.h"
-#include "zlib.h"
 #include "vnum.h"
 #include "vrnd.h"
 #include "vtcp.h"
@@ -419,7 +419,11 @@ http_splitheader(struct http *hp, int req)
 	}
 
 	n = 0;
-	p = hp->rxbuf;
+	p = hp->rx_b;
+	if (*p == '\0') {
+		vtc_log(hp->vl, 4, "No headers");
+		return;
+	}
 
 	/* REQ/PROTO */
 	while (vct_islws(*p))
@@ -507,8 +511,8 @@ http_rxchar(struct http *hp, int n, int eof)
 			continue;
 		}
 		assert(i > 0);
-		assert(hp->prxbuf + n < hp->nrxbuf);
-		i = read(hp->fd, hp->rxbuf + hp->prxbuf, n);
+		assert(hp->rx_p + n < hp->rx_e);
+		i = read(hp->fd, hp->rx_p, n);
 		if (!(pfd[0].revents & POLLIN))
 			vtc_log(hp->vl, 4,
 			    "HTTP rx poll (fd:%d revents: %x n=%d, i=%d)",
@@ -527,8 +531,8 @@ http_rxchar(struct http *hp, int n, int eof)
 			    hp->fd, strerror(errno));
 			return (-1);
 		}
-		hp->prxbuf += i;
-		hp->rxbuf[hp->prxbuf] = '\0';
+		hp->rx_p += i;
+		*hp->rx_p = '\0';
 		n -= i;
 	}
 	return (1);
@@ -537,93 +541,98 @@ http_rxchar(struct http *hp, int n, int eof)
 static int
 http_rxchunk(struct http *hp)
 {
-	char *q;
-	int l, i;
+	char *q, *old;
+	int i;
 
-	l = hp->prxbuf;
+	old = hp->rx_p;
 	do {
 		if (http_rxchar(hp, 1, 0) < 0)
 			return (-1);
-	} while (hp->rxbuf[hp->prxbuf - 1] != '\n');
-	vtc_dump(hp->vl, 4, "len", hp->rxbuf + l, -1);
-	i = strtoul(hp->rxbuf + l, &q, 16);
+	} while (hp->rx_p[-1] != '\n');
+	vtc_dump(hp->vl, 4, "len", old, -1);
+	i = strtoul(old, &q, 16);
 	bprintf(hp->chunklen, "%d", i);
-	if ((q == hp->rxbuf + l) ||
-		(*q != '\0' && !vct_islws(*q))) {
-		vtc_log(hp->vl, hp->fatal, "chunked fail %02x @ %td",
-		    *q, q - (hp->rxbuf + l));
+	if ((q == old) || (q == hp->rx_p) || (*q != '\0' && !vct_islws(*q))) {
+		vtc_log(hp->vl, hp->fatal, "Chunklen fail (%02x @ %td)",
+		    (*q & 0xff), q - old);
 		return (-1);
 	}
-	assert(q != hp->rxbuf + l);
 	assert(*q == '\0' || vct_islws(*q));
-	hp->prxbuf = l;
+	hp->rx_p = old;
 	if (i > 0) {
 		if (http_rxchar(hp, i, 0) < 0)
 			return (-1);
-		vtc_dump(hp->vl, 4, "chunk", hp->rxbuf + l, i);
+		vtc_dump(hp->vl, 4, "chunk", old, i);
 	}
-	l = hp->prxbuf;
+	old = hp->rx_p;
 	if (http_rxchar(hp, 2, 0) < 0)
 		return (-1);
-	if (!vct_iscrlf(hp->rxbuf + l)) {
-		vtc_log(hp->vl, hp->fatal,
-		    "Wrong chunk tail[0] = %02x",
-		    hp->rxbuf[l] & 0xff);
+	if (!vct_iscrlf(old)) {
+		vtc_log(hp->vl, hp->fatal, "Chunklen without CRLF");
 		return (-1);
 	}
-	if (!vct_iscrlf(hp->rxbuf + l + 1)) {
-		vtc_log(hp->vl, hp->fatal,
-		    "Wrong chunk tail[1] = %02x",
-		    hp->rxbuf[l + 1] & 0xff);
-		return (-1);
-	}
-	hp->prxbuf = l;
-	hp->rxbuf[l] = '\0';
+	hp->rx_p = old;
+	*hp->rx_p = '\0';
 	return (i);
 }
 
 /**********************************************************************
  * Swallow a HTTP message body
+ *
+ * max: 0 is all
  */
 
 static void
-http_swallow_body(struct http *hp, char * const *hh, int body)
+http_swallow_body(struct http *hp, char * const *hh, int body, int max)
 {
-	char *p;
+	const char *p, *q;
 	int i, l, ll;
 
-	ll = 0;
+	l = hp->rx_p - hp->body;
+
 	p = http_find_header(hh, "transfer-encoding");
+	q = http_find_header(hh, "content-length");
 	if (p != NULL && !strcasecmp(p, "chunked")) {
-		while (http_rxchunk(hp) > 0)
-			continue;
-		vtc_dump(hp->vl, 4, "body", hp->body, ll);
-		ll = hp->rxbuf + hp->prxbuf - hp->body;
-		hp->bodyl = ll;
-		bprintf(hp->bodylen, "%d", ll);
-		return;
-	}
-	p = http_find_header(hh, "content-length");
-	if (p != NULL) {
-		l = strtoul(p, NULL, 10);
-		if (http_rxchar(hp, l, 0) < 0)
+		if (q != NULL) {
+			vtc_log(hp->vl, hp->fatal, "Both C-E: Chunked and C-L");
 			return;
-		vtc_dump(hp->vl, 4, "body", hp->body, l);
-		hp->bodyl = l;
-		bprintf(hp->bodylen, "%d", l);
-		return;
-	}
-	if (body) {
+		}
+		ll = 0;
+		while (http_rxchunk(hp) > 0) {
+			ll = (hp->rx_p - hp->body) - l;
+			if (max && ll >= max)
+				break;
+		}
+		p = "chunked";
+	} else if (q != NULL) {
+		ll = strtoul(q, NULL, 10);
+		if (max && ll > l + max)
+			ll = max;
+		else
+			ll -= l;
+		i = http_rxchar(hp, ll, 0);
+		if (i < 0)
+			return;
+		p = "c-l";
+	} else if (body) {
+		ll = 0;
 		do  {
 			i = http_rxchar(hp, 1, 1);
 			if (i < 0)
 				return;
 			ll += i;
+			if (max && ll >= max)
+				break;
 		} while (i > 0);
-		vtc_dump(hp->vl, 4, "rxeof", hp->body, ll);
+		p = "eof";
+	} else {
+		p = "none";
+		ll = l = 0;
 	}
-	hp->bodyl = ll;
-	bprintf(hp->bodylen, "%d", ll);
+	vtc_dump(hp->vl, 4, p, hp->body + l, ll);
+	l += ll;
+	hp->bodyl = l;
+	bprintf(hp->bodylen, "%d", l);
 }
 
 /**********************************************************************
@@ -633,38 +642,44 @@ http_swallow_body(struct http *hp, char * const *hh, int body)
 static void
 http_rxhdr(struct http *hp)
 {
-	int i;
+	int i, s = 0;
 	char *p;
+	ssize_t l;
 
 	CHECK_OBJ_NOTNULL(hp, HTTP_MAGIC);
-	hp->prxbuf = 0;
+	hp->rx_p = hp->rx_b;
+	*hp->rx_p = '\0';
 	hp->body = NULL;
 	bprintf(hp->bodylen, "%s", "<undef>");
 	while (1) {
-		(void)http_rxchar(hp, 1, 0);
-		p = hp->rxbuf + hp->prxbuf - 1;
-		for (i = 0; p > hp->rxbuf; p--) {
-			if (*p != '\n')
-				break;
-			if (p - 1 > hp->rxbuf && p[-1] == '\r')
-				p--;
-			if (++i == 2)
-				break;
-		}
-		if (i == 2)
+		p = hp->rx_p;
+		i = http_rxchar(hp, 1, 1);
+		if (i < 1)
 			break;
+		if (s == 0 && *p == '\r')
+			s = 1;
+		else if ((s == 0 || s == 1) && *p == '\n')
+			s = 2;
+		else if (s == 2 && *p == '\r')
+			s = 3;
+		else if ((s == 2 || s == 3) && *p == '\n')
+			break;
+		else
+			s = 0;
 	}
-	vtc_dump(hp->vl, 4, "rxhdr", hp->rxbuf, -1);
-	vtc_log(hp->vl, 4, "rxhdrlen = %zd", strlen(hp->rxbuf));
-	hp->body = hp->rxbuf + hp->prxbuf;
+	l = hp->rx_p - hp->rx_b;
+	vtc_dump(hp->vl, 4, "rxhdr", hp->rx_b, l);
+	vtc_log(hp->vl, 4, "rxhdrlen = %zd", l);
+	hp->body = hp->rx_p;
 }
 
 /* SECTION: client-server.spec.rxresp
  *
  * rxresp [-no_obj] (client only)
- *         Receive and parse a response's headers and body. If -no_obj is present, only get
- *         the headers.
+ *         Receive and parse a response's headers and body. If -no_obj is
+ *         present, only get the headers.
  */
+
 static void
 cmd_http_rxresp(CMD_ARGS)
 {
@@ -691,10 +706,12 @@ cmd_http_rxresp(CMD_ARGS)
 		    "Multiple Content-Length headers.\n");
 	if (!has_obj)
 		return;
+	if (!hp->resp[0] || !hp->resp[1])
+		return;
 	else if (!strcmp(hp->resp[1], "200"))
-		http_swallow_body(hp, hp->resp, 1);
+		http_swallow_body(hp, hp->resp, 1, 0);
 	else
-		http_swallow_body(hp, hp->resp, 0);
+		http_swallow_body(hp, hp->resp, 0, 0);
 	vtc_log(hp->vl, 4, "bodylen = %s", hp->bodylen);
 }
 
@@ -703,6 +720,7 @@ cmd_http_rxresp(CMD_ARGS)
  * rxresphdrs (client only)
  *         Receive and parse a response's headers.
  */
+
 static void
 cmd_http_rxresphdrs(CMD_ARGS)
 {
@@ -723,7 +741,6 @@ cmd_http_rxresphdrs(CMD_ARGS)
 		vtc_fatal(hp->vl,
 		    "Multiple Content-Length headers.\n");
 }
-
 
 /**********************************************************************
  * Ungzip rx'ed body
@@ -1121,7 +1138,7 @@ cmd_http_rxreq(CMD_ARGS)
 	http_splitheader(hp, 1);
 	if (http_count_header(hp->req, "Content-Length") > 1)
 		vtc_fatal(vl, "Multiple Content-Length headers.\n");
-	http_swallow_body(hp, hp->req, 0);
+	http_swallow_body(hp, hp->req, 0, 0);
 	vtc_log(vl, 4, "bodylen = %s", hp->bodylen);
 }
 
@@ -1170,20 +1187,23 @@ cmd_http_rxreqbody(CMD_ARGS)
 
 	for (; *av != NULL; av++)
 		vtc_fatal(hp->vl, "Unknown http rxreq spec: %s\n", *av);
-	http_swallow_body(hp, hp->req, 0);
+	http_swallow_body(hp, hp->req, 0, 0);
 	vtc_log(hp->vl, 4, "bodylen = %s", hp->bodylen);
 }
 
 /* SECTION: client-server.spec.rxrespbody
  *
  * rxrespbody (client only)
- *         Receive a response's body.
+ *         Receive (part of) a response's body.
+ *
+ * -max : max length of this receive, 0 for all
  */
 
 static void
 cmd_http_rxrespbody(CMD_ARGS)
 {
 	struct http *hp;
+	int max = 0;
 
 	(void)cmd;
 	(void)vl;
@@ -1193,8 +1213,14 @@ cmd_http_rxrespbody(CMD_ARGS)
 	av++;
 
 	for (; *av != NULL; av++)
-		vtc_fatal(hp->vl, "Unknown http rxrespbody spec: %s\n", *av);
-	http_swallow_body(hp, hp->resp, 0);
+		if (!strcmp(*av, "-max")) {
+			max = atoi(av[1]);
+			av++;
+		} else
+			vtc_fatal(hp->vl,
+			    "Unknown http rxrespbody spec: %s\n", *av);
+
+	http_swallow_body(hp, hp->resp, 1, max);
 	vtc_log(hp->vl, 4, "bodylen = %s", hp->bodylen);
 }
 
@@ -1217,7 +1243,7 @@ cmd_http_rxchunk(CMD_ARGS)
 
 	i = http_rxchunk(hp);
 	if (i == 0) {
-		ll = hp->rxbuf + hp->prxbuf - hp->body;
+		ll = hp->rx_p - hp->body;
 		hp->bodyl = ll;
 		bprintf(hp->bodylen, "%d", ll);
 		vtc_log(hp->vl, 4, "bodylen = %s", hp->bodylen);
@@ -1712,10 +1738,10 @@ cmd_http_rxpri(CMD_ARGS)
 	CAST_OBJ_NOTNULL(hp, priv, HTTP_MAGIC);
 	ONLY_SERVER(hp, av);
 
-	hp->prxbuf = 0;
+	hp->rx_p = hp->rx_b;
 	if (!http_rxchar(hp, sizeof(PREFACE), 0))
 		vtc_fatal(vl, "Couldn't retrieve connection preface");
-	if (memcmp(hp->rxbuf, PREFACE, sizeof(PREFACE)))
+	if (memcmp(hp->rx_b, PREFACE, sizeof(PREFACE)))
 		vtc_fatal(vl, "Received invalid preface\n");
 	start_h2(hp);
 	AN(hp->h2);
@@ -1757,7 +1783,7 @@ cmd_http_settings(CMD_ARGS)
 static void
 cmd_http_stream(CMD_ARGS)
 {
-	struct http *hp = (struct http *)priv;
+	struct http *hp;
 	CAST_OBJ_NOTNULL(hp, priv, HTTP_MAGIC);
 	if (!hp->h2) {
 		vtc_log(hp->vl, 4, "Not in H/2 mode, do what's needed");
@@ -1866,7 +1892,7 @@ http_process_cleanup(void *arg)
 	if (hp->h2)
 		stop_h2(hp);
 	VSB_destroy(&hp->vsb);
-	free(hp->rxbuf);
+	free(hp->rx_b);
 	free(hp->rem_ip);
 	free(hp->rem_port);
 	free(hp->rem_path);
@@ -1887,8 +1913,11 @@ http_process(struct vtclog *vl, const char *spec, int sock, int *sfd,
 	hp->timeout = vtc_maxdur * 1000 / 2;
 
 	hp->nrxbuf = 2048*1024;
-	hp->rxbuf = malloc(hp->nrxbuf);		/* XXX */
-	AN(hp->rxbuf);
+	hp->rx_b = malloc(hp->nrxbuf);
+	AN(hp->rx_b);
+	hp->rx_e = hp->rx_b + hp->nrxbuf;
+	hp->rx_p = hp->rx_b;
+	*hp->rx_p = '\0';
 
 	hp->vsb = VSB_new_auto();
 	AN(hp->vsb);

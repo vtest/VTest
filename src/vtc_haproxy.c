@@ -145,7 +145,7 @@ haproxy_delete_envars(struct haproxy *h)
 }
 
 static void
-haproxy_build_env(struct haproxy *h)
+haproxy_build_env(const struct haproxy *h)
 {
 	struct envar *e;
 

@@ -123,7 +123,7 @@ init(void)
  * so we save a syscall by using gethrtime() if it is defined.
  */
 
-double
+vtim_mono
 VTIM_mono(void)
 {
 #ifdef HAVE_GETHRTIME
@@ -142,7 +142,7 @@ VTIM_mono(void)
 #endif
 }
 
-double
+vtim_real
 VTIM_real(void)
 {
 #ifdef HAVE_CLOCK_GETTIME
@@ -159,7 +159,7 @@ VTIM_real(void)
 }
 
 void
-VTIM_format(double t, char *p)
+VTIM_format(vtim_real t, char *p)
 {
 	struct tm tm;
 	time_t tt;
@@ -235,10 +235,10 @@ VTIM_format(double t, char *p)
 		DIGIT(1, sec);					\
 	} while(0)
 
-double
+vtim_real
 VTIM_parse(const char *p)
 {
-	double t;
+	vtim_real t;
 	int month = 0, year = 0, weekday = -1, mday = 0;
 	int hour = 0, min = 0, sec = 0;
 	int d, leap;
@@ -393,7 +393,7 @@ VTIM_parse(const char *p)
 }
 
 void
-VTIM_sleep(double t)
+VTIM_sleep(vtim_dur t)
 {
 #ifdef HAVE_NANOSLEEP
 	struct timespec ts;
@@ -414,7 +414,7 @@ VTIM_sleep(double t)
 }
 
 struct timeval
-VTIM_timeval(double t)
+VTIM_timeval(vtim_real t)
 {
 	struct timeval tv;
 
@@ -425,7 +425,7 @@ VTIM_timeval(double t)
 }
 
 struct timespec
-VTIM_timespec(double t)
+VTIM_timespec(vtim_real t)
 {
 	struct timespec tv;
 

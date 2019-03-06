@@ -31,10 +31,10 @@
 /* from libvarnish/vtim.c */
 extern unsigned VTIM_postel;
 #define VTIM_FORMAT_SIZE 30
-void VTIM_format(double t, char *p);
-double VTIM_parse(const char *p);
-double VTIM_mono(void);
-double VTIM_real(void);
-void VTIM_sleep(double t);
-struct timespec VTIM_timespec(double t);
-struct timeval VTIM_timeval(double t);
+void VTIM_format(vtim_real t, char *p);
+vtim_real VTIM_parse(const char *p);
+vtim_mono VTIM_mono(void);
+vtim_real VTIM_real(void);
+void VTIM_sleep(vtim_dur t);
+struct timespec VTIM_timespec(vtim_real t);
+struct timeval VTIM_timeval(vtim_real t);

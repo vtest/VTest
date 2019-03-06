@@ -4,6 +4,8 @@ PYTHON2	?=	python2
 PYTHON3	?=	python3
 PYTHON	?=	python
 
+VARNISH_SRC ?= /home/phk/Varnish/trunk/varnish-cache
+
 AWK	?=	awk
 
 SRCS=	src/*.c \
@@ -44,8 +46,6 @@ test: vtest
 
 #######################################################################
 # ... other point to varnish source tree and use this part:
-
-VARNISH_SRC=/home/phk/Varnish/trunk/varnish-cache
 
 varnishtest:	${DEPS}
 	${CC} \

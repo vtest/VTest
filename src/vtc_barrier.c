@@ -274,8 +274,8 @@ barrier_cond_sync(struct barrier *b, struct vtclog *vl)
 
 	if (++b->waiters == b->expected) {
 		vtc_log(vl, 4, "Barrier(%s) wake %u", b->name, b->expected);
-                if (b->cyclic)
-                    b->waiters = 0;
+		if (b->cyclic)
+			b->waiters = 0;
 		AZ(pthread_cond_broadcast(&b->cond));
 	} else {
 		vtc_log(vl, 4, "Barrier(%s) wait %u of %u",

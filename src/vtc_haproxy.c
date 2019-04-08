@@ -169,11 +169,11 @@ haproxy_cli_tcp_connect(struct vtclog *vl, const char *addr, double tmo,
 
 	fd = VTCP_open(addr, NULL, tmo, errp);
 	if (fd < 0)
-		return fd;
+		return (fd);
 	VTCP_myname(fd, mabuf, sizeof mabuf, mpbuf, sizeof mpbuf);
 	vtc_log(vl, 3,
 	    "CLI connected fd %d from %s %s to %s", fd, mabuf, mpbuf, addr);
-	return fd;
+	return (fd);
 }
 
 /*
@@ -471,7 +471,7 @@ haproxy_cli_new(struct haproxy *h)
 	hc->rxbuf = malloc(hc->rxbuf_sz);
 	AN(hc->rxbuf);
 
-	return hc;
+	return (hc);
 }
 
 static void
@@ -735,7 +735,7 @@ haproxy_build_backends(struct haproxy *h, const char *vsb_data)
 
 	s = strdup(vsb_data);
 	if (!s)
-		return -1;
+		return (-1);
 
 	p = s;
 	while (1) {
@@ -832,6 +832,7 @@ haproxy_write_conf(struct haproxy *h)
 
 	vsb = macro_expand(h->vl, VSB_data(h->cfg_vsb));
 	AN(vsb);
+	assert(VSB_len(vsb) >= 0);
 
 	vtc_dump(h->vl, 4, "conf", VSB_data(vsb), VSB_len(vsb));
 	if (VFIL_writefile(h->workdir, h->cfg_fn,

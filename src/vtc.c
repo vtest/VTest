@@ -65,6 +65,8 @@ vtc_vrnd_unlock(void)
 	AZ(pthread_mutex_unlock(&vtc_vrnd_mtx));
 }
 
+static const char *tfn;
+
 /**********************************************************************
  * Macro facility
  */
@@ -78,6 +80,18 @@ struct macro {
 };
 
 static VTAILQ_HEAD(,macro) macro_list = VTAILQ_HEAD_INITIALIZER(macro_list);
+
+static const struct cmds global_cmds[] = {
+#define CMD_GLOBAL(n) { #n, cmd_##n },
+#include "cmds.h"
+	{ NULL, NULL }
+};
+
+static const struct cmds cmds[] = {
+#define CMD_TOP(n) { #n, cmd_##n },
+#include "cmds.h"
+	{ NULL, NULL }
+};
 
 /**********************************************************************/
 
@@ -290,12 +304,6 @@ macro_expand(struct vtclog *vl, const char *text)
  * Static checkers like Coverity may bitch about this, but we don't care.
  */
 
-static const struct cmds global_cmds[] = {
-#define CMD_GLOBAL(n) { #n, cmd_##n },
-#include "cmds.h"
-	{ NULL, NULL }
-};
-
 
 void
 parse_string(const char *spec, const struct cmds *cmd, void *priv,
@@ -448,14 +456,6 @@ reset_cmds(const struct cmds *cmd)
  * Execute a file
  */
 
-static const struct cmds cmds[] = {
-#define CMD_TOP(n) { #n, cmd_##n },
-#include "cmds.h"
-	{ NULL, NULL }
-};
-
-static const char *tfn;
-
 int
 fail_out(void)
 {
@@ -464,12 +464,13 @@ fail_out(void)
 
 	if (once++) {
 		vtc_log(vltop, 1, "failure during reset");
-		return(vtc_error);
+		return (vtc_error);
 	}
 	old_err = vtc_error;
 	if (!vtc_stop)
 		vtc_stop = 1;
 	vtc_log(vltop, 1, "RESETTING after %s", tfn);
+	reset_cmds(global_cmds);
 	reset_cmds(cmds);
 	vtc_error |= old_err;
 
@@ -543,5 +544,5 @@ exec_file(const char *fn, const char *script, const char *tmpdir,
 
 	vtc_thread = pthread_self();
 	parse_string(script, cmds, NULL, vltop);
-	return(fail_out());
+	return (fail_out());
 }

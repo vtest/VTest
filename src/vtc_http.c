@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2008-2015 Varnish Software AS
+ * Copyright (c) 2008-2019 Varnish Software AS
  * All rights reserved.
  *
  * Author: Poul-Henning Kamp <phk@phk.freebsd.dk>
@@ -467,11 +467,15 @@ http_splitheader(struct http *hp, int req)
 		hh[n++] = p++;
 		while (*p != '\0' && !vct_iscrlf(p))
 			p++;
+		if (*p == '\0') {
+			break;
+		}
 		q = p;
 		p += vct_skipcrlf(p);
 		*q = '\0';
 	}
-	p += vct_skipcrlf(p);
+	if (*p != '\0')
+		p += vct_skipcrlf(p);
 	assert(*p == '\0');
 
 	for (n = 0; n < 3 || hh[n] != NULL; n++) {
@@ -670,6 +674,9 @@ http_rxhdr(struct http *hp)
 	l = hp->rx_p - hp->rx_b;
 	vtc_dump(hp->vl, 4, "rxhdr", hp->rx_b, l);
 	vtc_log(hp->vl, 4, "rxhdrlen = %zd", l);
+	if (i < 1)
+		vtc_log(hp->vl, hp->fatal, "HTTP header is incomplete");
+	*hp->rx_p = '\0';
 	hp->body = hp->rx_p;
 }
 
@@ -868,6 +875,7 @@ http_tx_parse_args(char * const *av, struct vtclog *vl, struct http *hp,
 	char *b, *c;
 	char *nullbody;
 	char *m;
+	ssize_t len;
 	int nolen = 0;
 	int l;
 
@@ -912,6 +920,14 @@ http_tx_parse_args(char * const *av, struct vtclog *vl, struct http *hp,
 					bodylen--;
 				}
 			}
+		} else if (!strcmp(*av, "-bodyfrom")) {
+			assert(body == nullbody);
+			free(body);
+			body = VFIL_readfile(NULL, av[1], &len);
+			AN(body);
+			assert(len < INT_MAX);
+			bodylen = len;
+			av++;
 		} else if (!strcmp(*av, "-bodylen")) {
 			assert(body == nullbody);
 			free(body);
@@ -970,8 +986,11 @@ http_tx_parse_args(char * const *av, struct vtclog *vl, struct http *hp,
  *         from who can send them is that the first line (request line vs
  *         status line), so all the options are prety much the same.
  *
- *         \-req STRING (txreq only)
+ *         \-method STRING (txreq only)
  *                 What method to use (default: "GET").
+ *
+ *         \-req STRING (txreq only)
+ *                 Alias for -method.
  *
  *         \-url STRING (txreq only)
  *                 What location to use (default "/").
@@ -1006,6 +1025,9 @@ http_tx_parse_args(char * const *av, struct vtclog *vl, struct http *hp,
  *
  *         \-body STRING
  *                 Input STRING as body.
+ *
+ *         \-bodyfrom FILE
+ *                 Same as -body but content is read from FILE.
  *
  *         \-bodylen NUMBER
  *                 Generate and input a body that is NUMBER bytes-long.
@@ -1283,7 +1305,8 @@ cmd_http_txreq(CMD_ARGS)
 		} else if (!strcmp(*av, "-proto")) {
 			proto = av[1];
 			av++;
-		} else if (!strcmp(*av, "-req")) {
+		} else if (!strcmp(*av, "-method") ||
+		    !strcmp(*av, "-req")) {
 			req = av[1];
 			hp->head_method = !strcasecmp(av[1], "HEAD") ;
 			av++;
@@ -1905,16 +1928,31 @@ http_process_cleanup(void *arg)
 
 int
 http_process(struct vtclog *vl, const char *spec, int sock, int *sfd,
-	     const char *addr)
+    const char *addr, int rcvbuf)
 {
 	struct http *hp;
-	int retval;
+	int retval, oldbuf;
+	socklen_t intlen = sizeof(int);
 
 	(void)sfd;
 	ALLOC_OBJ(hp, HTTP_MAGIC);
 	AN(hp);
 	hp->fd = sock;
 	hp->timeout = vtc_maxdur * 1000 / 2;
+
+	if (rcvbuf) {
+		// XXX setsockopt() too late on SunOS
+		// https://github.com/varnishcache/varnish-cache/pull/2980#issuecomment-486214661
+		hp->rcvbuf = rcvbuf;
+
+		oldbuf = 0;
+		AZ(getsockopt(hp->fd, SOL_SOCKET, SO_RCVBUF, &oldbuf, &intlen));
+		AZ(setsockopt(hp->fd, SOL_SOCKET, SO_RCVBUF, &rcvbuf, intlen));
+		AZ(getsockopt(hp->fd, SOL_SOCKET, SO_RCVBUF, &rcvbuf, &intlen));
+
+		vtc_log(vl, 3, "-rcvbuf fd=%d old=%d new=%d actual=%d",
+		    hp->fd, oldbuf, hp->rcvbuf, rcvbuf);
+	}
 
 	hp->nrxbuf = 2048*1024;
 	hp->rx_b = malloc(hp->nrxbuf);

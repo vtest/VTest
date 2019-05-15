@@ -38,6 +38,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/socket.h>
 
 #include "vtc.h"
 
@@ -107,6 +108,7 @@ struct vsb *params_vsb = NULL;
 int leave_temp;
 int vtc_witness = 0;
 static struct vsb *cbvsb;
+static int bad_backend_fd;
 
 static int cleaner_fd = -1;
 static pid_t cleaner_pid;
@@ -550,18 +552,10 @@ i_mode(void)
  * Figure out what IP related magic
  */
 
-static int v_matchproto_(vss_resolved_f)
-bind_cb(void *priv, const struct suckaddr *sa)
-{
-	(void)priv;
-	return (VTCP_bind(sa, NULL));
-}
-
 static void
 ip_magic(void)
 {
-	const char *p;
-	int fd;
+	struct suckaddr *sa;
 	char abuf[VTCP_ADDRBUFSIZE];
 	char pbuf[VTCP_PORTBUFSIZE];
 
@@ -572,9 +566,11 @@ ip_magic(void)
 	 * XXX: "localhost", but that doesn't work out of the box.
 	 * XXX: Things like "prefer_ipv6" parameter complicates things.
 	 */
-	fd = VSS_resolver("127.0.0.1", NULL, bind_cb, NULL, &p);
-	assert(fd >= 0);
-	VTCP_myname(fd, abuf, sizeof abuf, pbuf, sizeof(pbuf));
+	sa = VSS_ResolveOne(NULL, "127.0.0.1", "0", 0, SOCK_STREAM, 0);
+	AN(sa);
+	bad_backend_fd = VTCP_bind(sa, NULL);
+	assert(bad_backend_fd >= 0);
+	VTCP_myname(bad_backend_fd, abuf, sizeof abuf, pbuf, sizeof(pbuf));
 	extmacro_def("localhost", "%s", abuf);
 
 #if defined (__APPLE__)
@@ -583,7 +579,7 @@ ip_magic(void)
 	 * instead of refusing the connection so close it and hope
 	 * for the best.
 	 */
-	VTCP_close(&fd);
+	VTCP_close(&bad_backend_fd);
 #endif
 
 	/* Expose a backend that is forever down. */
@@ -797,6 +793,7 @@ main(int argc, char * const *argv)
 		i = VEV_Once(vb);
 	}
 	cleaner_finish();
+	(void)close(bad_backend_fd);
 	if (vtc_continue)
 		fprintf(stderr,
 		    "%d tests failed, %d tests skipped, %d tests passed\n",

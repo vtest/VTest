@@ -344,30 +344,19 @@ cmd_delay(CMD_ARGS)
  * DNS services.  This is a basic sanity check for those.
  */
 
-static int v_matchproto_(vss_resolved_f)
-dns_cb(void *priv, const struct suckaddr *sa)
-{
-	char abuf[VTCP_ADDRBUFSIZE];
-	char pbuf[VTCP_PORTBUFSIZE];
-	int *ret = priv;
-
-	VTCP_name(sa, abuf, sizeof abuf, pbuf, sizeof pbuf);
-	if (strcmp(abuf, "192.0.2.255")) {
-		fprintf(stderr, "DNS-test: Wrong response: %s\n", abuf);
-		*ret = -1;
-	} else if (*ret == 0)
-		*ret = 1;
-	return (0);
-}
-
 static int
 dns_works(void)
 {
-	int ret = 0, error;
-	const char *msg;
+	struct suckaddr *sa;
+	char abuf[VTCP_ADDRBUFSIZE];
+	char pbuf[VTCP_PORTBUFSIZE];
 
-	error = VSS_resolver("dns-canary.freebsd.dk", NULL, dns_cb, &ret, &msg);
-	if (error || msg != NULL || ret != 1)
+	sa = VSS_ResolveOne(NULL, "dns-canary.freebsd.dk", NULL, 0, 0, 0);
+	if (sa == NULL)
+		return (0);
+	VTCP_name(sa, abuf, sizeof abuf, pbuf, sizeof pbuf);
+	free(sa);
+	if (strcmp(abuf, "192.0.2.255"))
 		return (0);
 	return (1);
 }
@@ -382,8 +371,6 @@ dns_works(void)
  *        The SO_RCVTIMEO socket option is working
  * 64bit
  *        The environment is 64 bits
- * !OSX
- *        The environment is not OSX
  * dns
  *        DNS lookups are working
  * topbuild
@@ -449,13 +436,6 @@ cmd_feature(CMD_ARGS)
 #endif
 		}
 
-		if (!strcmp(*av, "!OSX")) {
-#if !defined(__APPLE__) || !defined(__MACH__)
-			good = 1;
-#else
-			vtc_stop = 2;
-#endif
-		}
 		FEATURE("pcre_jit", VRE_has_jit);
 		FEATURE("64bit", sizeof(void*) == 8);
 		FEATURE("dns", dns_works());

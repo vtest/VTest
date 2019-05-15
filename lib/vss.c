@@ -46,14 +46,15 @@
 
 /*
  * Take a string provided by the user and break it up into address and
- * port parts.  Examples of acceptable input include:
+ * port parts. The address and port separator may be either a colon or
+ * a whitespace. Examples of acceptable input include:
  *
- * "localhost" - "localhost:80"
- * "127.0.0.1" - "127.0.0.1:80"
- * "0.0.0.0" - "0.0.0.0:80"
- * "[::1]" - "[::1]:80"
- * "[::]" - "[::]:80"
- * "::1" - "[::1]:80"
+ * "localhost" - "localhost:80" - "localhost 80"
+ * "127.0.0.1" - "127.0.0.1:80" - "127.0.0.1 80"
+ * "0.0.0.0"   - "0.0.0.0:80"   - "0.0.0.0 80"
+ * "[::1]"     - "[::1]:80"     - "[::1] 80"
+ * "[::]"      - "[::]:80"      - "[::] 80"
+ * "::1"       - "[::1]:80"     - "::1 80"
  *
  * See also RFC5952
  */
@@ -153,4 +154,42 @@ VSS_resolver(const char *addr, const char *def_port, vss_resolved_f *func,
 {
 	return (VSS_resolver_socktype(
 	    addr, def_port, func, priv, err, SOCK_STREAM));
+}
+
+struct suckaddr *
+VSS_ResolveOne(void *dst, const char *addr, const char *port,
+    int family, int socktype, int flags)
+{
+	struct addrinfo hints, *res = NULL;
+	struct suckaddr *retval = NULL;
+	char *p = NULL, *hp, *pp;
+	int error;
+
+	memset(&hints, 0, sizeof hints);
+	hints.ai_family = family;
+	hints.ai_socktype = socktype;
+	hints.ai_flags = flags;
+
+	AN(addr);
+	if (port != NULL) {
+		error = getaddrinfo(addr, port, &hints, &res);
+	} else {
+		p = strdup(addr);
+		AN(p);
+		if (vss_parse(p, &hp, &pp) != NULL || pp == NULL) {
+			free(p);
+			return (NULL);
+		}
+		error = getaddrinfo(hp, pp, &hints, &res);
+		free(p);
+	}
+	if (!error && res != NULL && res->ai_next == NULL) {
+		if (dst == NULL)
+			retval = VSA_Malloc(res->ai_addr, res->ai_addrlen);
+		else
+			retval = VSA_Build(dst, res->ai_addr, res->ai_addrlen);
+	}
+	if (res != NULL)
+		freeaddrinfo(res);
+	return (retval);
 }

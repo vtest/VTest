@@ -395,20 +395,28 @@ vjsn_value(struct vjsn *js)
 }
 
 struct vjsn *
-vjsn_parse(const char *src, const char **err)
+vjsn_parse_end(const char *from, const char *to, const char **err)
 {
 	struct vjsn *js;
 	char *p, *e;
+	size_t sz;
 
-	AN(src);
+	AN(from);
 
 	AN(err);
 	*err = NULL;
 
-	p = strdup(src);
+	if (to == NULL)
+		to = strchr(from, '\0');
+	AN(to);
+
+	sz = to - from;
+
+	p = malloc(sz + 1L);
 	AN(p);
-	e = strchr(p, '\0');
-	AN(e);
+	memcpy(p, from, sz);
+	p[sz] = '\0';
+	e = p + sz;
 
 	ALLOC_OBJ(js, VJSN_MAGIC);
 	AN(js);
@@ -431,6 +439,13 @@ vjsn_parse(const char *src, const char **err)
 	return (js);
 }
 
+struct vjsn *
+vjsn_parse(const char *src, const char **err)
+{
+
+	return (vjsn_parse_end(src, NULL, err));
+}
+
 struct vjsn_val *
 vjsn_child(const struct vjsn_val *vv, const char *key)
 {
@@ -450,6 +465,7 @@ vjsn_dump_i(const struct vjsn_val *jsv, FILE *fo, int indent)
 {
 	struct vjsn_val *jsve;
 
+	CHECK_OBJ_NOTNULL(jsv, VJSN_VAL_MAGIC);
 	printf("%*s", indent, "");
 	if (jsv->name != NULL)
 		printf("[\"%s\"]: ", jsv->name);
@@ -465,6 +481,13 @@ vjsn_dump_i(const struct vjsn_val *jsv, FILE *fo, int indent)
 	printf("\n");
 	VTAILQ_FOREACH(jsve, &jsv->children, list)
 		vjsn_dump_i(jsve, fo, indent + 2);
+}
+
+void
+vjsn_dump_val(const struct vjsn_val *jsv, FILE *fo)
+{
+	CHECK_OBJ_NOTNULL(jsv, VJSN_VAL_MAGIC);
+	vjsn_dump_i(jsv, fo, 0);
 }
 
 void

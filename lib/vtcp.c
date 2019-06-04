@@ -52,6 +52,7 @@
 #include "vsa.h"
 #include "vss.h"
 #include "vtcp.h"
+#include "vtim.h"
 
 /*--------------------------------------------------------------------*/
 static void
@@ -370,6 +371,7 @@ VTCP_set_read_timeout(int s, vtim_dur seconds)
 static int v_matchproto_(vss_resolved_f)
 vtcp_open_callback(void *priv, const struct suckaddr *sa)
 {
+	/* XXX: vtim_dur? */
 	double *p = priv;
 
 	return (VTCP_connect(sa, (int)floor(*p * 1e3)));
@@ -379,20 +381,12 @@ int
 VTCP_open(const char *addr, const char *def_port, vtim_dur timeout,
     const char **errp)
 {
-	int error;
-	const char *err;
 
-	if (errp != NULL)
-		*errp = NULL;
+	AN(errp);
 	assert(timeout >= 0);
-	error = VSS_resolver(addr, def_port, vtcp_open_callback,
-	    &timeout, &err);
-	if (err != NULL) {
-		if (errp != NULL)
-			*errp = err;
-		return (-1);
-	}
-	return (error);
+
+	return (VSS_resolver(addr, def_port, vtcp_open_callback,
+	    &timeout, errp));
 }
 
 /*--------------------------------------------------------------------
@@ -511,6 +505,7 @@ VTCP_listen_on(const char *addr, const char *def_port, int depth,
 	struct helper h;
 	int sock;
 
+	AN(errp);
 	h.depth = depth;
 	h.errp = errp;
 

@@ -61,14 +61,15 @@ static const char *const h2_types[] = {
 	NULL
 };
 
-#define SETTINGS_MAX 0x06
-
 static const char * const h2_settings[] = {
 	[0] = "unknown",
 #define H2_SETTING(U,l,v,...) [v] = #U,
 #include <tbl/h2_settings.h>
 	NULL
 };
+
+#define SETTINGS_MAX (sizeof(h2_settings)/sizeof(h2_settings[0]) - 1U)
+
 
 enum h2_type {
 #define H2_FRAME(l,u,t,f,...) TYPE_##u = t,
@@ -569,8 +570,8 @@ static void
 parse_settings(const struct stream *s, struct frame *f)
 {
 	struct http *hp;
-	int t, v;
-	unsigned u;
+	int v;
+	unsigned u, t;
 	const char *buf;
 	enum hpk_result r;
 	CHECK_OBJ_NOTNULL(f, FRAME_MAGIC);
@@ -600,7 +601,7 @@ parse_settings(const struct stream *s, struct frame *f)
 			assert(r == hpk_done);
 		}
 
-		vtc_log(hp->vl, 4, "settings->%s (%d): %d", buf, t, v);
+		vtc_log(hp->vl, 4, "settings->%s (%u): %d", buf, t, v);
 	}
 
 }
@@ -1333,6 +1334,13 @@ cmd_sendhex(CMD_ARGS)
  *	Do the same thing as ``-body`` but generate an string of INT length
  *	for you.
  *
+ * \-gzipbody STRING (txreq, txresp)
+ *      Gzip STRING and send it as body.
+ *
+ * \-gziplen NUMBER (txreq, txresp)
+ *      Combine -body and -gzipbody: create a body of length NUMBER,
+ *      gzip it and send as body.
+ *
  * \-nostrend (txreq, txresp)
  *	Don't set the END_STREAM flag automatically, making the peer expect
  *	a body after the headers.
@@ -1385,7 +1393,7 @@ cmd_tx11obj(CMD_ARGS)
 	/*XXX: do we need a better api? yes we do */
 	struct hpk_hdr hdr;
 	char *cmd_str = *av;
-	char *p;
+	char *b, *p;
 	(void)cmd;
 
 	CAST_OBJ_NOTNULL(s, priv, STREAM_MAGIC);
@@ -1539,7 +1547,28 @@ cmd_tx11obj(CMD_ARGS)
 				bodylen = strlen(body);
 				f.flags &= ~END_STREAM;
 				av++;
-			}else if (AV_IS("-dep")) {
+			}
+			else if (!strcmp(*av, "-gzipbody")) {
+				AZ(body);
+				vtc_gzip(s->hp, av[1], &body,
+				    (unsigned *)&bodylen);
+				AN(body);
+				ENC(hdr, ":content-encoding", "gzip");
+				f.flags &= ~END_STREAM;
+				av++;
+			}
+			else if (!strcmp(*av, "-gziplen")) {
+				AZ(body);
+				b = synth_body(av[1], 1);
+				vtc_gzip(s->hp, b, &body,
+				    (unsigned *)&bodylen);
+				AN(body);
+				free(b);
+				ENC(hdr, ":content-encoding", "gzip");
+				f.flags &= ~END_STREAM;
+				av++;
+			}
+			else if (AV_IS("-dep")) {
 				STRTOU32_CHECK(stid, av, p, vl, "-dep", 0);
 				f.flags |= PRIORITY;
 			}
@@ -2437,6 +2466,27 @@ cmd_expect(CMD_ARGS)
 	AZ(pthread_mutex_unlock(&s->hp->mtx));
 }
 
+/* SECTION: stream.spec.gunzip gunzip
+ *
+ * Same as the ``gunzip`` command for HTTP/1.
+ */
+static void
+cmd_gunzip(CMD_ARGS)
+{
+	struct http *hp;
+	struct stream *s;
+
+	(void)av;
+	(void)cmd;
+	(void)vl;
+
+	CAST_OBJ_NOTNULL(s, priv, STREAM_MAGIC);
+	hp = s->hp;
+	CHECK_OBJ_NOTNULL(hp, HTTP_MAGIC);
+
+	vtc_gunzip(s->hp, s->body, (unsigned *)&s->bodylen);
+}
+
 /* SECTION: stream.spec.write_body
  *
  * write_body STRING
@@ -2468,6 +2518,7 @@ static const struct cmds stream_cmds[] = {
 #define CMD_STREAM(n) { #n, cmd_##n },
 	/* spec */
 	CMD_STREAM(expect)
+	CMD_STREAM(gunzip)
 	CMD_STREAM(rxcont)
 	CMD_STREAM(rxdata)
 	CMD_STREAM(rxframe)

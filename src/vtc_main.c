@@ -570,6 +570,7 @@ ip_magic(void)
 	AN(sa);
 	bad_backend_fd = VTCP_bind(sa, NULL);
 	assert(bad_backend_fd >= 0);
+	free(sa);
 	VTCP_myname(bad_backend_fd, abuf, sizeof abuf, pbuf, sizeof(pbuf));
 	extmacro_def("localhost", "%s", abuf);
 

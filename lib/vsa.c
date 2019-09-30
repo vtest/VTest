@@ -252,6 +252,10 @@ VSA_Malloc(const void *s, unsigned  sal)
 	}
 	if (l != 0) {
 		ALLOC_OBJ(sua, SUCKADDR_MAGIC);
+		/* XXX: shouldn't we AN(sua) instead of mixing up failed
+		 * allocations with unsupported address family or bogus
+		 * sockaddr?
+		 */
 		if (sua != NULL)
 			memcpy(&sua->sa, s, l);
 	}
@@ -359,7 +363,7 @@ VSA_Compare_IP(const struct suckaddr *sua1, const struct suckaddr *sua2)
 	default:
 		WRONG("Just plain insane");
 	}
-	NEEDLESS(return(-1));
+	NEEDLESS(return (-1));
 }
 
 struct suckaddr *

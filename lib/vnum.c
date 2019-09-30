@@ -30,20 +30,20 @@
 
 #include "config.h"
 
-#include <ctype.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "vdef.h"
 
 #include "vnum.h"
 #include "vas.h"
+#include "vct.h"
 
 static const char err_miss_num[] = "Missing number";
 static const char err_invalid_num[] = "Invalid number";
-static const char err_abs_req[] = "Absolute number required";
 static const char err_invalid_suff[] = "Invalid suffix";
 
 /**********************************************************************
@@ -61,15 +61,16 @@ VNUMpfx(const char *p, const char **t)
 	AN(p);
 	AN(t);
 	*t = NULL;
-	while (isspace(*p))
+	while (vct_issp(*p))
 		p++;
 
 	if (*p == '-' || *p == '+')
 		ms = (*p++ == '-' ? -1.0 : 1.0);
 
 	for (; *p != '\0'; p++) {
-		if (isdigit(*p)) {
-			m = m * 10. + *p - '0';
+		if (vct_isdigit(*p)) {
+			m *= 10.;
+			m += *p - '0';
 			e = ne;
 			if (e)
 				ne = e - 1.0;
@@ -79,17 +80,17 @@ VNUMpfx(const char *p, const char **t)
 			break;
 	}
 	if (e > 0.0)
-		return(nan(""));		// No digits
+		return (nan(""));		// No digits
 	if (*p == 'e' || *p == 'E') {
 		p++;
 		if (*p == '-' || *p == '+')
 			es = (*p++ == '-' ? -1.0 : 1.0);
-		if (!isdigit(*p))
+		if (!vct_isdigit(*p))
 			return (nan(""));
-		for (; isdigit(*p); p++)
+		for (; vct_isdigit(*p); p++)
 			ee = ee * 10. + *p - '0';
 	}
-	while (isspace(*p))
+	while (vct_issp(*p))
 		p++;
 	if (*p != '\0')
 		*t = p;
@@ -110,31 +111,27 @@ VNUM(const char *p)
 
 /**********************************************************************/
 
-double
-VNUM_duration(const char *p)
+vtim_dur
+VNUM_duration_unit(vtim_dur r, const char *b, const char *e)
 {
-	const char *t;
-	double r, sc = 1.0;
+	double sc;
 
-	if (p == NULL)
+	if (e == NULL)
+		e = strchr(b, '\0');
+
+	while (b < e && vct_issp(*b))
+		b++;
+	if (b == e)
 		return (nan(""));
 
-	r = VNUMpfx(p, &t);
-
-	if (isnan(r) || t == NULL)
-		return (nan(""));
-
-	while (isspace(*t))
-		t++;
-
-	// keep in sync with vcc_expr.c vcc_TimeUnit()
-	switch (*t++) {
+	switch (*b++) {
 	case 's':
+		sc = 1.0;
 		break;
 	case 'm':
-		if (*t == 's') {
+		if (b < e && *b == 's') {
 			sc = 1e-3;
-			t++;
+			b++;
 		} else
 			sc = 60.0;
 		break;
@@ -154,16 +151,71 @@ VNUM_duration(const char *p)
 		return (nan(""));
 	}
 
-	while (isspace(*t))
-		t++;
+	while (b < e && vct_issp(*b))
+		b++;
 
-	if (*t != '\0')
+	if (b < e)
 		return (nan(""));
 
 	return (r * sc);
 }
 
+vtim_dur
+VNUM_duration(const char *p)
+{
+	const char *t;
+	vtim_dur r;
+
+	if (p == NULL)
+		return (nan(""));
+
+	r = VNUMpfx(p, &t);
+
+	if (isnan(r) || t == NULL)
+		return (nan(""));
+
+	return (VNUM_duration_unit(r, t, NULL));
+}
+
 /**********************************************************************/
+
+double
+VNUM_bytes_unit(double r, const char *b, const char *e, uintmax_t rel)
+{
+	double sc = 1.0;
+
+	if (e == NULL)
+		e = strchr(b, '\0');
+
+	while (b < e && vct_issp(*b))
+		b++;
+	if (b == e)
+		return (nan(""));
+
+	if (rel != 0 && *b == '%') {
+		r *= rel * 0.01;
+		b++;
+	} else {
+		switch (*b) {
+		case 'k': case 'K': sc = exp2(10); b++; break;
+		case 'm': case 'M': sc = exp2(20); b++; break;
+		case 'g': case 'G': sc = exp2(30); b++; break;
+		case 't': case 'T': sc = exp2(40); b++; break;
+		case 'p': case 'P': sc = exp2(50); b++; break;
+		case 'b': case 'B':
+			break;
+		default:
+			return (nan(""));
+		}
+		if (b < e && (*b == 'b' || *b == 'B'))
+			b++;
+	}
+	while (b < e && vct_issp(*b))
+		b++;
+	if (b < e)
+		return (nan(""));
+	return (sc * r);
+}
 
 const char *
 VNUM_2bytes(const char *p, uintmax_t *r, uintmax_t rel)
@@ -183,48 +235,9 @@ VNUM_2bytes(const char *p, uintmax_t *r, uintmax_t rel)
 		return (NULL);
 	}
 
-	if (end[0] == '%' && end[1] == '\0') {
-		if (rel == 0)
-			return (err_abs_req);
-		fval *= rel / 100.0;
-	} else {
-		/* accept a space before the multiplier */
-		if (end[0] == ' ' && end[1] != '\0')
-			++end;
-
-		switch (end[0]) {
-		case 'k': case 'K':
-			fval *= (uintmax_t)1 << 10;
-			++end;
-			break;
-		case 'm': case 'M':
-			fval *= (uintmax_t)1 << 20;
-			++end;
-			break;
-		case 'g': case 'G':
-			fval *= (uintmax_t)1 << 30;
-			++end;
-			break;
-		case 't': case 'T':
-			fval *= (uintmax_t)1 << 40;
-			++end;
-			break;
-		case 'p': case 'P':
-			fval *= (uintmax_t)1 << 50;
-			++end;
-			break;
-		default:
-			break;
-		}
-
-		/* [bB] is a generic suffix of no effect */
-		if (end[0] == 'b' || end[0] == 'B')
-			end++;
-
-		if (end[0] != '\0')
-			return (err_invalid_suff);
-	}
-
+	fval = VNUM_bytes_unit(fval, end, NULL, rel);
+	if (isnan(fval))
+		return (err_invalid_suff);
 	*r = (uintmax_t)round(fval);
 	return (NULL);
 }
@@ -266,12 +279,18 @@ static struct test_case {
 	{ "1T",			(uintmax_t)0,	(uintmax_t)1<<40 },
 	{ "1TB",		(uintmax_t)0,	(uintmax_t)1<<40 },
 	{ "1.3TB",		(uintmax_t)0,	(uintmax_t)1429365116109ULL },
-	{ "1.7TB",		(uintmax_t)0,	(uintmax_t)1869169767219ULL },
+	{ "1.7\tTB",		(uintmax_t)0,	(uintmax_t)1869169767219ULL },
 
 	{ "1125899906842624",	(uintmax_t)0,	(uintmax_t)1125899906842624ULL},
-	{ "1P",			(uintmax_t)0,	(uintmax_t)1125899906842624ULL},
-	{ "1PB",		(uintmax_t)0,	(uintmax_t)1125899906842624ULL},
+	{ "1P\t",		(uintmax_t)0,	(uintmax_t)1125899906842624ULL},
+	{ "1PB ",		(uintmax_t)0,	(uintmax_t)1125899906842624ULL},
 	{ "1.3 PB",		(uintmax_t)0,	(uintmax_t)1463669878895411ULL},
+
+	// highest integers not rounded for double conversion
+	{ "9007199254740988",	(uintmax_t)0,	(uintmax_t)9007199254740988ULL},
+	{ "9007199254740989",	(uintmax_t)0,	(uintmax_t)9007199254740989ULL},
+	{ "9007199254740990",	(uintmax_t)0,	(uintmax_t)9007199254740990ULL},
+	{ "9007199254740991",	(uintmax_t)0,	(uintmax_t)9007199254740991ULL},
 
 	{ "1%",			(uintmax_t)1024,	(uintmax_t)10 },
 	{ "2%",			(uintmax_t)1024,	(uintmax_t)20 },
@@ -280,7 +299,7 @@ static struct test_case {
 	/* Check the error checks */
 	{ "",			0,	0,	err_miss_num },
 	{ "m",			0,	0,	err_invalid_num },
-	{ "4%",			0,	0,	err_abs_req },
+	{ "4%",			0,	0,	err_invalid_suff },
 	{ "3*",			0,	0,	err_invalid_suff },
 
 	/* TODO: add more */
@@ -348,15 +367,17 @@ main(int argc, char *argv[])
 
 	for (tc = test_cases; tc->str; ++tc) {
 		e = VNUM_2bytes(tc->str, &val, tc->rel);
-		if (e != tc->err) {
-			printf("%s: VNUM_2bytes(\"%s\", %ju) (%s) != (%s)\n",
-			    *argv, tc->str, tc->rel, tc->err, e);
-			++ec;
-		} else if (e == NULL && val != tc->val) {
-			printf("%s: VNUM_2bytes(\"%s\", %ju) %ju != %ju (%s)\n",
-			    *argv, tc->str, tc->rel, val, tc->val, e);
-			++ec;
-		}
+		if (e != NULL)
+			val = 0;
+		if (e == tc->err && val == tc->val)
+			continue;
+		++ec;
+		printf("%s: VNUM_2bytes(\"%s\", %ju)\n",
+		   *argv, tc->str, tc->rel);
+		printf("\tExpected:\tstatus %s - value %ju\n",
+		    tc->err ? tc->err : "Success", tc->val);
+		printf("\tGot:\t\tstatus %s - value %ju\n",
+		    e ? e : "Success", val);
 	}
 	if (!isnan(VNUM_duration(NULL))) {
 		printf("%s: VNUM_Duration(NULL) fail\n", *argv);

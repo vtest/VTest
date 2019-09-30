@@ -69,14 +69,15 @@ extern const struct cmds http_cmds[];
  * SECTION: client-server.macros Macros and automatic behaviour
  *
  * To make things easier in the general case, clients will connect by default
- * to the first Varnish server declared and the -vcl+backend switch of the
- * ``varnish`` command will add all the declared servers as backends.
+ * to a Varnish server called v1. To connect to a different Varnish server, use
+ * '-connect ${vNAME_sock}'.
  *
- * Be careful though, servers will by default listen to the 127.0.0.1 IP and
- * will pick a random port, and publish 3 macros: sNAME_addr, sNAME_port and
- * sNAME_sock, but only once they are started.
- * For 'varnish -vcl+backend' to create the vcl with the correct values, the
- * server must be started first.
+ * The -vcl+backend switch of the ``varnish`` command will add all the declared
+ * servers as backends. Be careful though, servers will by default listen to
+ * the 127.0.0.1 IP and will pick a random port, and publish 3 macros:
+ * sNAME_addr, sNAME_port and sNAME_sock, but only once they are started. For
+ * 'varnish -vcl+backend' to create the vcl with the correct values, the server
+ * must be started first.
  *
  * SECTION: client-server.args Arguments
  *
@@ -428,20 +429,20 @@ http_splitheader(struct http *hp, int req)
 	hh[n++] = p;
 	while (!vct_islws(*p))
 		p++;
-	AZ(vct_iscrlf(p));
+	AZ(vct_iscrlf(p, hp->rx_e));
 	*p++ = '\0';
 
 	/* URL/STATUS */
 	while (vct_issp(*p))		/* XXX: H space only */
 		p++;
-	AZ(vct_iscrlf(p));
+	AZ(vct_iscrlf(p, hp->rx_e));
 	hh[n++] = p;
 	while (!vct_islws(*p))
 		p++;
-	if (vct_iscrlf(p)) {
+	if (vct_iscrlf(p, hp->rx_e)) {
 		hh[n++] = NULL;
 		q = p;
-		p += vct_skipcrlf(p);
+		p = vct_skipcrlf(p, hp->rx_e);
 		*q = '\0';
 	} else {
 		*p++ = '\0';
@@ -449,30 +450,29 @@ http_splitheader(struct http *hp, int req)
 		while (vct_issp(*p))		/* XXX: H space only */
 			p++;
 		hh[n++] = p;
-		while (!vct_iscrlf(p))
+		while (!vct_iscrlf(p, hp->rx_e))
 			p++;
 		q = p;
-		p += vct_skipcrlf(p);
+		p = vct_skipcrlf(p, hp->rx_e);
 		*q = '\0';
 	}
 	assert(n == 3);
 
 	while (*p != '\0') {
 		assert(n < MAX_HDR);
-		if (vct_iscrlf(p))
+		if (vct_iscrlf(p, hp->rx_e))
 			break;
 		hh[n++] = p++;
-		while (*p != '\0' && !vct_iscrlf(p))
+		while (*p != '\0' && !vct_iscrlf(p, hp->rx_e))
 			p++;
 		if (*p == '\0') {
 			break;
 		}
 		q = p;
-		p += vct_skipcrlf(p);
+		p = vct_skipcrlf(p, hp->rx_e);
 		*q = '\0';
 	}
-	if (*p != '\0')
-		p += vct_skipcrlf(p);
+	p = vct_skipcrlf(p, hp->rx_e);
 	assert(*p == '\0');
 
 	for (n = 0; n < 3 || hh[n] != NULL; n++) {
@@ -568,7 +568,7 @@ http_rxchunk(struct http *hp)
 	old = hp->rx_p;
 	if (http_rxchar(hp, 2, 0) < 0)
 		return (-1);
-	if (!vct_iscrlf(old)) {
+	if (!vct_iscrlf(old, hp->rx_e)) {
 		vtc_log(hp->vl, hp->fatal, "Chunklen without CRLF");
 		return (-1);
 	}

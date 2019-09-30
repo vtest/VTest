@@ -73,6 +73,13 @@ VLU_New(vlu_f *func, void *priv, unsigned bufsize)
 }
 
 void
+VLU_Reset(struct vlu *l)
+{
+	CHECK_OBJ_NOTNULL(l, LINEUP_MAGIC);
+	l->bufp = 0;
+}
+
+void
 VLU_Destroy(struct vlu **lp)
 {
 	struct vlu *l;
@@ -120,7 +127,9 @@ VLU_Fd(struct vlu *l, int fd)
 
 	CHECK_OBJ_NOTNULL(l, LINEUP_MAGIC);
 	i = read(fd, l->buf + l->bufp, l->bufl - l->bufp);
-	if (i <= 0)
+	if (i == 0)
+		return (-2);
+	if (i < 0)
 		return (-1);
 	l->bufp += i;
 	return (LineUpProcess(l));

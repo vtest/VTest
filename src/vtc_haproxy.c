@@ -87,6 +87,9 @@ struct haproxy {
 	/* TCP socket CLI. */
 	struct haproxy_cli *cli;
 
+	/* master CLI */
+	struct haproxy_cli *mcli;
+
 	char			*workdir;
 	struct vsb		*msgs;
 	char			closed_sock[256]; /* Closed TCP socket */
@@ -191,6 +194,7 @@ cmd_haproxy_cli_send(CMD_ARGS)
 {
 	struct vsb *vsb;
 	struct haproxy_cli *hc;
+	int j;
 
 	(void)cmd;
 	(void)vl;
@@ -224,6 +228,13 @@ cmd_haproxy_cli_send(CMD_ARGS)
 	if (VSB_tofile(hc->sock, vsb))
 		vtc_fatal(hc->vl,
 		    "CLI fd %d send error %s", hc->sock, strerror(errno));
+
+	/* a CLI command must be followed by a SHUT_WR if we want HAProxy to
+	 * close after the response */
+	j = shutdown(hc->sock, SHUT_WR);
+	vtc_log(hc->vl, 3, "CLI shutting fd %d", hc->sock);
+	if (!VTCP_Check(j))
+		vtc_fatal(hc->vl, "Shutdown failed: %s", strerror(errno));
 
 	VSB_destroy(&vsb);
 }
@@ -475,6 +486,51 @@ haproxy_cli_new(struct haproxy *h)
 	return (hc);
 }
 
+/* creates a master CLI client (-mcli) */
+static struct haproxy_cli *
+haproxy_mcli_new(struct haproxy *h)
+{
+	struct haproxy_cli *hc;
+
+	ALLOC_OBJ(hc, HAPROXY_CLI_MAGIC);
+	AN(hc);
+
+	hc->vl = h->vl;
+	hc->sock = -1;
+	bprintf(hc->connect, "${%s_mcli_sock}", h->name);
+
+	hc->txbuf_sz = hc->rxbuf_sz = 2048 * 1024;
+	hc->txbuf = malloc(hc->txbuf_sz);
+	AN(hc->txbuf);
+	hc->rxbuf = malloc(hc->rxbuf_sz);
+	AN(hc->rxbuf);
+
+	return (hc);
+}
+
+/* Bind an address/port for the master CLI (-mcli) */
+static int
+haproxy_create_mcli(struct haproxy *h)
+{
+	int sock;
+	const char *err;
+	char buf[128], addr[128], port[128];
+
+	sock = VTCP_listen_on("localhost:0", NULL, 100, &err);
+	if (err != NULL)
+		vtc_fatal(h->vl,
+			  "Create listen socket failed: %s", err);
+	assert(sock > 0);
+
+	VTCP_myname(sock, addr, sizeof addr, port, sizeof port);
+	bprintf(buf, "%s_mcli", h->name);
+	macro_def(h->vl, buf, "sock", "%s %s", addr, port);
+	macro_def(h->vl, buf, "addr", "%s", addr);
+	macro_def(h->vl, buf, "port", "%s", port);
+
+	return sock;
+}
+
 static void
 haproxy_cli_delete(struct haproxy_cli *hc)
 {
@@ -545,6 +601,9 @@ haproxy_new(const char *name)
 	h->cli = haproxy_cli_new(h);
 	AN(h->cli);
 
+	h->mcli = haproxy_mcli_new(h);
+	AN(h->mcli);
+
 	bprintf(buf, "rm -rf \"%s\" ; mkdir -p \"%s\"", h->workdir, h->workdir);
 	AZ(system(buf));
 
@@ -578,6 +637,7 @@ haproxy_delete(struct haproxy *h)
 	free(h->pid_fn);
 	VSB_destroy(&h->args);
 	haproxy_cli_delete(h->cli);
+	haproxy_cli_delete(h->mcli);
 
 	/* XXX: MEMLEAK (?) */
 	FREE_OBJ(h);
@@ -597,6 +657,7 @@ haproxy_thread(void *priv)
 	h->its_dead_jim = 1;
 	return (NULL);
 }
+
 
 /**********************************************************************
  * Start a HAProxy instance.
@@ -625,8 +686,13 @@ haproxy_start(struct haproxy *h)
 	else
 		VSB_printf(vsb, " -d");
 
-	if (h->opt_worker)
+	if (h->opt_worker) {
+		int sock;
+
+		sock = haproxy_create_mcli(h);
 		VSB_printf(vsb, " -W");
+		VSB_printf(vsb, " -S \"fd@%d\"", sock);
+	}
 
 	VSB_printf(vsb, " %s", VSB_data(h->args));
 
@@ -706,6 +772,9 @@ haproxy_wait(struct haproxy *h)
 
 	if (h->cli->spec)
 		haproxy_cli_run(h->cli);
+
+	if (h->mcli->spec)
+		haproxy_cli_run(h->mcli);
 
 	closefd(&h->fds[1]);
 
@@ -904,6 +973,10 @@ haproxy_write_conf(struct haproxy *h)
  * \-cli STRING
  *         Specify the spec to be run by the command line interface (CLI).
  *
+ * \-mcli STRING
+ *         Specify the spec to be run by the command line interface (CLI)
+ *         of the Master process.
+ *
  * \-conf STRING
  *         Specify the configuration to be loaded by this HAProxy instance.
  *
@@ -1001,6 +1074,15 @@ cmd_haproxy(CMD_ARGS)
 			av++;
 			continue;
 		}
+
+		if (!strcmp(*av, "-mcli")) {
+			REPLACE(h->mcli->spec, av[1]);
+			if (h->tp)
+				haproxy_cli_run(h->mcli);
+			av++;
+			continue;
+		}
+
 		if (!strcmp(*av, "-conf")) {
 			AN(av[1]);
 			haproxy_store_conf(h, av[1], 0);

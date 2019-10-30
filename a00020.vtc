@@ -9,7 +9,7 @@ feature cmd {haproxy --version 2>&1 | grep -q 'HA-Proxy version'}
 server s1 {
 } -start
 
-haproxy h1 -W -conf {
+haproxy h1 -W -S -conf {
     global
 	nbproc 4
     defaults

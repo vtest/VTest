@@ -47,6 +47,7 @@
 
 #define HAPROXY_PROGRAM_ENV_VAR	"HAPROXY_PROGRAM"
 #define HAPROXY_OPT_WORKER	"-W"
+#define HAPROXY_OPT_MCLI	"-S"
 #define HAPROXY_OPT_DAEMON	"-D"
 #define HAPROXY_SIGNAL		SIGINT
 #define HAPROXY_EXPECT_EXIT	(128 + HAPROXY_SIGNAL)
@@ -68,6 +69,7 @@ struct haproxy {
 	const char		*filename;
 	struct vsb		*args;
 	int			opt_worker;
+	int			opt_mcli;
 	int			opt_daemon;
 	int			opt_check_mode;
 	char			*pid_fn;
@@ -672,8 +674,8 @@ haproxy_start(struct haproxy *h)
 	vtc_log(h->vl, 2, "%s", __func__);
 
 	AZ(VSB_finish(h->args));
-	vtc_log(h->vl, 4, "opt_worker %d opt_daemon %d opt_check_mode %d",
-	    h->opt_worker, h->opt_daemon, h->opt_check_mode);
+	vtc_log(h->vl, 4, "opt_worker %d opt_daemon %d opt_check_mode %d opt_mcli %d",
+	    h->opt_worker, h->opt_daemon, h->opt_check_mode, h->opt_mcli);
 
 	vsb = VSB_new_auto();
 	AN(vsb);
@@ -687,11 +689,12 @@ haproxy_start(struct haproxy *h)
 		VSB_printf(vsb, " -d");
 
 	if (h->opt_worker) {
-		int sock;
-
-		sock = haproxy_create_mcli(h);
 		VSB_printf(vsb, " -W");
-		VSB_printf(vsb, " -S \"fd@%d\"", sock);
+		if (h->opt_mcli) {
+			int sock;
+			sock = haproxy_create_mcli(h);
+			VSB_printf(vsb, " -S \"fd@%d\"", sock);
+		}
 	}
 
 	VSB_printf(vsb, " %s", VSB_data(h->args));
@@ -967,6 +970,9 @@ haproxy_write_conf(struct haproxy *h)
  * \-W
  *         Enable HAproxy in Worker mode.
  *
+ * \-S
+ *         Enable HAproxy Master CLI in Worker mode
+ *
  * \-arg STRING
  *         Pass an argument to haproxy, for example "-h simple_list".
  *
@@ -1057,7 +1063,10 @@ cmd_haproxy(CMD_ARGS)
 			h->opt_worker = 1;
 			continue;
 		}
-
+		if (!strcmp(*av, HAPROXY_OPT_MCLI)) {
+			h->opt_mcli = 1;
+			continue;
+		}
 		if (!strcmp(*av, "-arg")) {
 			AN(av[1]);
 			AZ(h->pid);

@@ -682,14 +682,14 @@ haproxy_start(struct haproxy *h)
 
 	VSB_printf(vsb, "exec \"%s\"", h->filename);
 	if (h->opt_check_mode)
-		VSB_printf(vsb, " -c");
+		VSB_cat(vsb, " -c");
 	else if (h->opt_daemon)
-		VSB_printf(vsb, " -D");
+		VSB_cat(vsb, " -D");
 	else
-		VSB_printf(vsb, " -d");
+		VSB_cat(vsb, " -d");
 
 	if (h->opt_worker) {
-		VSB_printf(vsb, " -W");
+		VSB_cat(vsb, " -W");
 		if (h->opt_mcli) {
 			int sock;
 			sock = haproxy_create_mcli(h);
@@ -899,7 +899,7 @@ haproxy_store_conf(struct haproxy *h, const char *cfg, int auto_be)
 
 	VSB_printf(vsb, "    global\n\tstats socket \"%s\" "
 		   "level admin mode 600\n", h->cli_fn);
-	VSB_printf(vsb, "    stats socket \"fd@${cli}\" level admin\n");
+	VSB_cat(vsb, "    stats socket \"fd@${cli}\" level admin\n");
 	AZ(VSB_cat(vsb, cfg));
 
 	if (auto_be)

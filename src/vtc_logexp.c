@@ -66,9 +66,10 @@
  *
  * \-q query
  *         Filter records using a query expression, see ``man vsl-query`` for
- *         more information.
+ *         more information. Multiple -q options are not supported.
+ *
  * \-m
- *	   Also emit log records for misses (only for debugging)
+ *         Also emit log records for misses (only for debugging)
  *
  * \-start
  *         Start the logexpect thread in the background.
@@ -77,9 +78,6 @@
  *         Wait for the logexpect thread to finish
  *
  * VSL arguments (similar to the varnishlog options):
- *
- * \-b|-c
- *         Process only backend/client records.
  *
  * \-C
  *         Use caseless regex
@@ -281,7 +279,7 @@ logexp_dispatch(struct VSL_data *vsl, struct VSL_transaction * const pt[],
 			data = VSL_CDATA(t->c->rec.ptr);
 			len = VSL_LEN(t->c->rec.ptr) - 1;
 
-			if (tag == SLT__Batch)
+			if (tag == SLT__Batch || tag == SLT_Witness)
 				continue;
 
 			ok = 1;

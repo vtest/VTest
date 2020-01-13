@@ -222,6 +222,9 @@ client_thread(void *priv)
 
 	vsb = macro_expand(vl, c->connect);
 	AN(vsb);
+#if !defined(__sun)
+	pthread_cleanup_push((void (*)(void *))VSB_delete, vsb);
+#endif
 	c->addr = VSB_data(vsb);
 
 	if (c->repeat == 0)
@@ -243,8 +246,11 @@ client_thread(void *priv)
 		VTCP_close(&fd);
 	}
 	vtc_log(vl, 2, "Ending");
-	VSB_destroy(&vsb);
+#if !defined(__sun)
 	pthread_cleanup_pop(0);
+#endif
+	pthread_cleanup_pop(0);
+	VSB_delete(vsb);
 	vtc_logclose(vl);
 	return (NULL);
 }

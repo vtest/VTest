@@ -72,6 +72,7 @@ struct vtc_tst {
 	const char		*filename;
 	char			*script;
 	unsigned		ntodo;
+	unsigned		nwait;
 };
 
 struct vtc_job {
@@ -169,7 +170,7 @@ parse_D_opt(char *arg)
  * Print usage
  */
 
-static void
+static void v_noreturn_
 usage(void)
 {
 	fprintf(stderr, "usage: %s [options] file ...\n", argv0);
@@ -370,6 +371,11 @@ tst_cb(const struct vev *ve, int what)
 			VEV_Stop(vb, jp->evt);
 			free(jp->evt);
 		}
+		jp->tst->nwait--;
+		if (jp->tst->nwait == 0) {
+			free(jp->tst->script);
+			FREE_OBJ(jp->tst);
+		}
 		FREE_OBJ(jp);
 		return (1);
 	}
@@ -406,8 +412,7 @@ start_test(void)
 		VTAILQ_INSERT_TAIL(&tst_head, tp, list);
 
 	jp->tst = tp;
-	jp->tmpdir = strdup(tmpdir);
-	AN(jp->tmpdir);
+	REPLACE(jp->tmpdir, tmpdir);
 
 	AZ(pipe(p));
 	assert(p[0] > STDERR_FILENO);
@@ -641,6 +646,7 @@ read_file(const char *fn, int ntest)
 	tp->filename = fn;
 	tp->script = p;
 	tp->ntodo = ntest;
+	tp->nwait = ntest;
 	VTAILQ_INSERT_TAIL(&tst_head, tp, list);
 	return (0);
 }

@@ -151,10 +151,10 @@ VTCP_filter_http(int sock)
 	int retval;
 	struct accept_filter_arg afa;
 
-	memset(&afa, 0, sizeof(afa));
-	strcpy(afa.af_name, "httpready");
+	memset(&afa, 0, sizeof afa);
+	bprintf(afa.af_name, "%s", "httpready");
 	retval = setsockopt(sock, SOL_SOCKET, SO_ACCEPTFILTER,
-	    &afa, sizeof afa );
+	    &afa, sizeof afa);
 	return (retval);
 }
 
@@ -166,7 +166,7 @@ VTCP_filter_http(int sock)
 	int retval;
 	int defer = 1;
 
-	retval = setsockopt(sock, SOL_TCP,TCP_DEFER_ACCEPT,
+	retval = setsockopt(sock, SOL_TCP, TCP_DEFER_ACCEPT,
 	    &defer, sizeof defer);
 	return (retval);
 }

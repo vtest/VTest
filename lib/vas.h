@@ -40,7 +40,7 @@
 #ifndef VAS_H_INCLUDED
 #define VAS_H_INCLUDED
 
-#include <errno.h>
+#include "verrno.h"
 
 enum vas_e {
 	VAS_WRONG,

@@ -42,9 +42,10 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+#include "miniobj.h"
 #include "vdef.h"
 #include "vas.h"
-#include "binary_heap.h"
+#include "vbh.h"
 
 #if !defined(__has_feature)
 #define __has_feature(x)	0
@@ -81,12 +82,12 @@
 /*lint -emacro(835, A) 0 left of & */
 #define A(b, n)			ROW(b, n)[(n) & (ROW_WIDTH - 1)]
 
-struct binheap {
+struct vbh {
 	unsigned		magic;
-#define BINHEAP_MAGIC		0xf581581aU	/* from /dev/random */
+#define VBH_MAGIC		0xf581581aU	/* from /dev/random */
 	void			*priv;
-	binheap_cmp_t		*cmp;
-	binheap_update_t	*update;
+	vbh_cmp_t		*cmp;
+	vbh_update_t		*update;
 	void			***array;
 	unsigned		rows;
 	unsigned		length;
@@ -101,7 +102,7 @@ struct binheap {
 #ifdef VM_AWARE
 
 static  unsigned
-parent(const struct binheap *bh, unsigned u)
+parent(const struct vbh *bh, unsigned u)
 {
 	unsigned po;
 	unsigned v;
@@ -122,7 +123,7 @@ parent(const struct binheap *bh, unsigned u)
 }
 
 static void
-child(const struct binheap *bh, unsigned u, unsigned *a, unsigned *b)
+child(const struct vbh *bh, unsigned u, unsigned *a, unsigned *b)
 {
 	uintmax_t uu;
 
@@ -167,7 +168,7 @@ child(const struct binheap *bh, unsigned u, unsigned *a, unsigned *b)
 #else
 
 static unsigned
-parent(const struct binheap *bh, unsigned u)
+parent(const struct vbh *bh, unsigned u)
 {
 
 	(void)bh;
@@ -175,7 +176,7 @@ parent(const struct binheap *bh, unsigned u)
 }
 
 static void
-child(const struct binheap *bh, unsigned u, unsigned *a, unsigned *b)
+child(const struct vbh *bh, unsigned u, unsigned *a, unsigned *b)
 {
 
 	(void)bh;
@@ -188,7 +189,7 @@ child(const struct binheap *bh, unsigned u, unsigned *a, unsigned *b)
 /* Implementation ----------------------------------------------------*/
 
 static void
-binheap_addrow(struct binheap *bh)
+vbh_addrow(struct vbh *bh)
 {
 	unsigned u;
 
@@ -208,13 +209,13 @@ binheap_addrow(struct binheap *bh)
 	bh->length += ROW_WIDTH;
 }
 
-struct binheap *
-binheap_new(void *priv, binheap_cmp_t *cmp_f, binheap_update_t *update_f)
+struct vbh *
+VBH_new(void *priv, vbh_cmp_t *cmp_f, vbh_update_t *update_f)
 {
-	struct binheap *bh;
+	struct vbh *bh;
 	unsigned u;
 
-	bh = calloc(1, sizeof *bh);
+	ALLOC_OBJ(bh, VBH_MAGIC);
 	if (bh == NULL)
 		return (bh);
 	bh->priv = priv;
@@ -237,17 +238,31 @@ binheap_new(void *priv, binheap_cmp_t *cmp_f, binheap_update_t *update_f)
 #endif
 	bh->array = calloc(bh->rows, sizeof *bh->array);
 	assert(bh->array != NULL);
-	binheap_addrow(bh);
+	vbh_addrow(bh);
 	A(bh, ROOT_IDX) = NULL;
-	bh->magic = BINHEAP_MAGIC;
+	bh->magic = VBH_MAGIC;
 	return (bh);
 }
 
-static void
-binheap_update(const struct binheap *bh, unsigned u)
+void
+VBH_destroy(struct vbh **bhp)
 {
-	assert(bh != NULL);
-	assert(bh->magic == BINHEAP_MAGIC);
+	struct vbh *bh;
+	unsigned u;
+
+	TAKE_OBJ_NOTNULL(bh, bhp, VBH_MAGIC);
+	AZ(VBH_root(bh));
+
+	for (u = 0; u < bh->length; u += ROW_WIDTH)
+		free(ROW(bh, u));
+	free(bh->array);
+	free(bh);
+}
+
+static void
+vbh_update(const struct vbh *bh, unsigned u)
+{
+	CHECK_OBJ_NOTNULL(bh, VBH_MAGIC);
 	assert(u < bh->next);
 	assert(A(bh, u) != NULL);
 	if (bh->update != NULL)
@@ -255,12 +270,11 @@ binheap_update(const struct binheap *bh, unsigned u)
 }
 
 static void
-binhead_swap(const struct binheap *bh, unsigned u, unsigned v)
+binhead_swap(const struct vbh *bh, unsigned u, unsigned v)
 {
 	void *p;
 
-	assert(bh != NULL);
-	assert(bh->magic == BINHEAP_MAGIC);
+	CHECK_OBJ_NOTNULL(bh, VBH_MAGIC);
 	assert(u < bh->next);
 	assert(A(bh, u) != NULL);
 	assert(v < bh->next);
@@ -268,16 +282,16 @@ binhead_swap(const struct binheap *bh, unsigned u, unsigned v)
 	p = A(bh, u);
 	A(bh, u) = A(bh, v);
 	A(bh, v) = p;
-	binheap_update(bh, u);
-	binheap_update(bh, v);
+	vbh_update(bh, u);
+	vbh_update(bh, v);
 }
 
 static unsigned
-binheap_trickleup(const struct binheap *bh, unsigned u)
+vbh_trickleup(const struct vbh *bh, unsigned u)
 {
 	unsigned v;
 
-	assert(bh != NULL); assert(bh->magic == BINHEAP_MAGIC);
+	CHECK_OBJ_NOTNULL(bh, VBH_MAGIC);
 	assert(u < bh->next);
 	assert(A(bh, u) != NULL);
 
@@ -297,12 +311,11 @@ binheap_trickleup(const struct binheap *bh, unsigned u)
 }
 
 static unsigned
-binheap_trickledown(const struct binheap *bh, unsigned u)
+vbh_trickledown(const struct vbh *bh, unsigned u)
 {
 	unsigned v1, v2;
 
-	assert(bh != NULL);
-	assert(bh->magic == BINHEAP_MAGIC);
+	CHECK_OBJ_NOTNULL(bh, VBH_MAGIC);
 	assert(u < bh->next);
 	assert(A(bh, u) != NULL);
 
@@ -333,20 +346,19 @@ binheap_trickledown(const struct binheap *bh, unsigned u)
 }
 
 void
-binheap_insert(struct binheap *bh, void *p)
+VBH_insert(struct vbh *bh, void *p)
 {
 	unsigned u;
 
-	assert(bh != NULL);
-	assert(bh->magic == BINHEAP_MAGIC);
+	CHECK_OBJ_NOTNULL(bh, VBH_MAGIC);
 	assert(bh->length >= bh->next);
 	if (bh->length == bh->next)
-		binheap_addrow(bh);
+		vbh_addrow(bh);
 	assert(bh->length > bh->next);
 	u = bh->next++;
 	A(bh, u) = p;
-	binheap_update(bh, u);
-	(void)binheap_trickleup(bh, u);
+	vbh_update(bh, u);
+	(void)vbh_trickleup(bh, u);
 	assert(u < bh->next);
 	assert(A(bh, u) != NULL);
 }
@@ -354,7 +366,7 @@ binheap_insert(struct binheap *bh, void *p)
 
 #ifdef PARANOIA
 static void
-chk(const struct binheap *bh)
+chk(const struct vbh *bh)
 {
 	unsigned u, v;
 
@@ -366,11 +378,10 @@ chk(const struct binheap *bh)
 #endif
 
 void *
-binheap_root(const struct binheap *bh)
+VBH_root(const struct vbh *bh)
 {
 
-	assert(bh != NULL);
-	assert(bh->magic == BINHEAP_MAGIC);
+	CHECK_OBJ_NOTNULL(bh, VBH_MAGIC);
 #ifdef PARANOIA
 	chk(bh);
 #endif
@@ -402,28 +413,27 @@ binheap_root(const struct binheap *bh)
  */
 
 void
-binheap_delete(struct binheap *bh, unsigned idx)
+VBH_delete(struct vbh *bh, unsigned idx)
 {
 
-	assert(bh != NULL);
-	assert(bh->magic == BINHEAP_MAGIC);
+	CHECK_OBJ_NOTNULL(bh, VBH_MAGIC);
 	assert(bh->next > ROOT_IDX);
 	assert(idx < bh->next);
 	assert(idx > 0);
 	assert(A(bh, idx) != NULL);
-	bh->update(bh->priv, A(bh, idx), BINHEAP_NOIDX);
+	bh->update(bh->priv, A(bh, idx), VBH_NOIDX);
 	if (idx == --bh->next) {
 		A(bh, bh->next) = NULL;
 		return;
 	}
 	A(bh, idx) = A(bh, bh->next);
 	A(bh, bh->next) = NULL;
-	binheap_update(bh, idx);
-	idx = binheap_trickleup(bh, idx);
+	vbh_update(bh, idx);
+	idx = vbh_trickleup(bh, idx);
 	assert(idx < bh->next);
 	assert(idx > 0);
 	assert(A(bh, idx) != NULL);
-	idx = binheap_trickledown(bh, idx);
+	idx = vbh_trickledown(bh, idx);
 	assert(idx < bh->next);
 	assert(idx > 0);
 	assert(A(bh, idx) != NULL);
@@ -445,20 +455,19 @@ binheap_delete(struct binheap *bh, unsigned idx)
  */
 
 void
-binheap_reorder(const struct binheap *bh, unsigned idx)
+VBH_reorder(const struct vbh *bh, unsigned idx)
 {
 
-	assert(bh != NULL);
-	assert(bh->magic == BINHEAP_MAGIC);
+	CHECK_OBJ_NOTNULL(bh, VBH_MAGIC);
 	assert(bh->next > ROOT_IDX);
 	assert(idx < bh->next);
 	assert(idx > 0);
 	assert(A(bh, idx) != NULL);
-	idx = binheap_trickleup(bh, idx);
+	idx = vbh_trickleup(bh, idx);
 	assert(idx < bh->next);
 	assert(idx > 0);
 	assert(A(bh, idx) != NULL);
-	idx = binheap_trickledown(bh, idx);
+	idx = vbh_trickledown(bh, idx);
 	assert(idx < bh->next);
 	assert(idx > 0);
 	assert(A(bh, idx) != NULL);
@@ -470,7 +479,6 @@ binheap_reorder(const struct binheap *bh, unsigned idx)
 #include <string.h>
 
 #include "vrnd.h"
-#include "miniobj.h"
 
 /* Test driver -------------------------------------------------------*/
 
@@ -488,7 +496,7 @@ struct foo {
 
 struct foo *ff[N];
 
-static int v_matchproto_(binheap_cmp_t)
+static int v_matchproto_(vbh_cmp_t)
 cmp(void *priv, const void *a, const void *b)
 {
 	const struct foo *fa, *fb;
@@ -499,7 +507,7 @@ cmp(void *priv, const void *a, const void *b)
 	return (fa->key < fb->key);
 }
 
-static void v_matchproto_(binheap_update_t)
+static void v_matchproto_(vbh_update_t)
 update(void *priv, void *a, unsigned u)
 {
 	struct foo *fa;
@@ -511,7 +519,7 @@ update(void *priv, void *a, unsigned u)
 
 #ifdef CHECK2
 static void
-chk2(struct binheap *bh)
+chk2(struct vbh *bh)
 {
 	unsigned u, v;
 	struct foo *fa, *fb;
@@ -530,18 +538,10 @@ vrnd_lock(void)
 {
 }
 
-#if defined(__SANITIZER) || __has_feature(address_sanitizer)
-int __lsan_is_turned_off(void);
-int __lsan_is_turned_off(void)
-{
-	return (1);
-}
-
-#endif
 int
 main(void)
 {
-	struct binheap *bh;
+	struct vbh *bh;
 	unsigned j, u, v, lr, n;
 	struct foo *fp;
 
@@ -550,7 +550,7 @@ main(void)
 	VRND_Lock = vrnd_lock;
 	VRND_Unlock = vrnd_lock;
 
-	bh = binheap_new(NULL, cmp, update);
+	bh = VBH_new(NULL, cmp, update);
 	for (n = 2; n; n += n) {
 		child(bh, n - 1, &u, &v);
 		child(bh, n, &u, &v);
@@ -567,16 +567,16 @@ main(void)
 			assert(ff[u] != NULL);
 			ff[u]->key = lr;
 			ff[u]->n = u;
-			binheap_insert(bh, ff[u]);
+			VBH_insert(bh, ff[u]);
 
-			fp = binheap_root(bh);
+			fp = VBH_root(bh);
 			assert(fp->idx == 1);
 			assert(fp->key <= lr);
 		}
 		fprintf(stderr, "%d inserts OK\n", N);
 		/* For M cycles, pick the root, insert new */
 		for (u = 0; u < M; u++) {
-			fp = binheap_root(bh);
+			fp = VBH_root(bh);
 			CHECK_OBJ_NOTNULL(fp, FOO_MAGIC);
 			assert(fp->idx == 1);
 
@@ -585,7 +585,7 @@ main(void)
 			 * value we added
 			 */
 			assert(fp->key <= lr);
-			binheap_delete(bh, fp->idx);
+			VBH_delete(bh, fp->idx);
 
 			n = fp->n;
 			ALLOC_OBJ(ff[n], FOO_MAGIC);
@@ -596,18 +596,18 @@ main(void)
 
 			lr = VRND_RandomTestable() % R;
 			fp->key = lr;
-			binheap_insert(bh, fp);
+			VBH_insert(bh, fp);
 		}
 		fprintf(stderr, "%d replacements OK\n", M);
 		/* The remove everything */
 		lr = 0;
 		for (u = 0; u < N; u++) {
-			fp = binheap_root(bh);
+			fp = VBH_root(bh);
 			CHECK_OBJ_NOTNULL(fp, FOO_MAGIC);
 			assert(fp->idx == 1);
 			assert(fp->key >= lr);
 			lr = fp->key;
-			binheap_delete(bh, fp->idx);
+			VBH_delete(bh, fp->idx);
 			ff[fp->n] = NULL;
 			FREE_OBJ(fp);
 		}
@@ -619,19 +619,19 @@ main(void)
 				CHECK_OBJ_NOTNULL(ff[v], FOO_MAGIC);
 				AN(ff[v]->idx);
 				if (ff[v]->key & 1) {
-					binheap_delete(bh, ff[v]->idx);
-					assert(ff[v]->idx == BINHEAP_NOIDX);
+					VBH_delete(bh, ff[v]->idx);
+					assert(ff[v]->idx == VBH_NOIDX);
 					FREE_OBJ(ff[v]);
 					ff[v] = NULL;
 				} else {
 					ff[v]->key = VRND_RandomTestable() % R;
-					binheap_reorder(bh, ff[v]->idx);
+					VBH_reorder(bh, ff[v]->idx);
 				}
 			} else {
 				ALLOC_OBJ(ff[v], FOO_MAGIC);
 				assert(ff[v] != NULL);
 				ff[v]->key = VRND_RandomTestable() % R;
-				binheap_insert(bh, ff[v]);
+				VBH_insert(bh, ff[v]);
 				CHECK_OBJ_NOTNULL(ff[v], FOO_MAGIC);
 				AN(ff[v]->idx);
 			}
@@ -641,6 +641,12 @@ main(void)
 		}
 		fprintf(stderr, "%d updates OK\n", M);
 	}
+	while ((fp = VBH_root(bh)) != NULL) {
+		VBH_delete(bh, fp->idx);
+		FREE_OBJ(fp);
+	}
+	VBH_destroy(&bh);
+	AZ(bh);
 	return (0);
 }
 #endif

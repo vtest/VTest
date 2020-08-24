@@ -34,9 +34,9 @@
 
 #include "vas.h"
 
-#define VCT_SP			(1<<0)
+#define VCT_OWS			(1<<0)
 #define VCT_CRLF		(1<<1)
-#define VCT_LWS			(VCT_CRLF | VCT_SP)
+#define VCT_LWS			(VCT_CRLF | VCT_OWS)
 #define VCT_CTL			(1<<2)
 #define VCT_ALPHA		(1<<3)
 #define VCT_SEPARATOR		(1<<4)
@@ -47,6 +47,7 @@
 #define VCT_TCHAR		(1<<9)
 #define VCT_ID			(1<<10)
 #define VCT_IDENT		(VCT_ALPHA | VCT_DIGIT | VCT_ID)
+#define VCT_BASE64		(1<<11)
 #define VCT_VT			(1<<12)
 #define VCT_SPACE		(VCT_LWS | VCT_VT)
 #define VCT_UPPER		(1<<13)
@@ -64,7 +65,8 @@ vct_is(int x, uint16_t y)
 	return (vct_typtab[x] & (y));
 }
 
-#define vct_issp(x) vct_is(x, VCT_SP)
+#define vct_isows(x) vct_is(x, VCT_OWS)
+#define vct_issp(x) vct_is(x, VCT_OWS)
 #define vct_ishex(x) vct_is(x, VCT_HEX)
 #define vct_islws(x) vct_is(x, VCT_LWS)
 #define vct_isctl(x) vct_is(x, VCT_CTL)
@@ -74,6 +76,7 @@ vct_is(int x, uint16_t y)
 #define vct_islower(x) vct_is(x, VCT_LOWER)
 #define vct_isupper(x) vct_is(x, VCT_UPPER)
 #define vct_isalnum(x) vct_is(x, VCT_ALPHA | VCT_DIGIT)
+#define vct_isbase64(x) vct_is(x, VCT_BASE64)
 #define vct_issep(x) vct_is(x, VCT_SEPARATOR)
 #define vct_issepctl(x) vct_is(x, VCT_SEPARATOR | VCT_CTL)
 #define vct_isident1(x) vct_isalpha(x)

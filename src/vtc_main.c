@@ -698,7 +698,7 @@ main(int argc, char * const *argv)
 	else
 		tmppath = strdup("/tmp");
 
-	cwd = getcwd(0, 0);
+	cwd = getcwd(NULL, 0);
 	extmacro_def("pwd", "%s", cwd);
 
 	vmod_path = NULL;

@@ -72,6 +72,21 @@ static pthread_mutex_t			syslog_mtx;
 static VTAILQ_HEAD(, syslog_srv)	syslogs =
     VTAILQ_HEAD_INITIALIZER(syslogs);
 
+#define SYSLOGCMDS \
+	CMD_SYSLOG(expect) \
+	CMD_SYSLOG(recv)
+
+#define CMD_SYSLOG(nm) static cmd_f cmd_syslog_##nm;
+SYSLOGCMDS
+#undef CMD_SYSLOG
+
+static const struct cmds syslog_cmds[] = {
+#define CMD_SYSLOG(n) { #n, cmd_syslog_##n },
+SYSLOGCMDS
+#undef CMD_SYSLOG
+	{ NULL, NULL }
+};
+
 static const char * const syslog_levels[] = {
 	"emerg",
 	"alert",
@@ -246,8 +261,9 @@ syslog_new(const char *name, struct vtclog *vl)
 	ALLOC_OBJ(s, SYSLOG_SRV_MAGIC);
 	AN(s);
 	REPLACE(s->name, name);
-	s->vl = vtc_logopen(s->name);
+	s->vl = vtc_logopen("%s", s->name);
 	AN(s->vl);
+	vtc_log_set_cmd(s->vl, syslog_cmds);
 
 	bprintf(s->bind, "%s", "127.0.0.1 0");
 	s->repeat = 1;
@@ -255,7 +271,7 @@ syslog_new(const char *name, struct vtclog *vl)
 	s->lvl = -1;
 	s->timeout = vtc_maxdur * .5;		// XXX
 
-	vl = vtc_logopen(s->name);
+	vl = vtc_logopen("%s", s->name);
 	AN(vl);
 
 	s->rxbuf_sz = s->rxbuf_left = 2048*1024;
@@ -371,7 +387,6 @@ cmd_syslog_expect(CMD_ARGS)
 	char *cmp, *spec;
 
 	(void)vl;
-	(void)cmd;
 	CAST_OBJ_NOTNULL(s, priv, SYSLOG_SRV_MAGIC);
 	AZ(strcmp(av[0], "expect"));
 	av++;
@@ -407,7 +422,6 @@ cmd_syslog_recv(CMD_ARGS)
 	struct syslog_srv *s;
 
 	CAST_OBJ_NOTNULL(s, priv, SYSLOG_SRV_MAGIC);
-	(void)cmd;
 	(void)vl;
 	AZ(strcmp(av[0], "recv"));
 	av++;
@@ -418,15 +432,6 @@ cmd_syslog_recv(CMD_ARGS)
 
 	syslog_rx(s, lvl);
 }
-
-static const struct cmds syslog_cmds[] = {
-#define CMD_SYSLOG(n) { #n, cmd_syslog_##n },
-	/* session */
-	CMD_SYSLOG(expect)
-	CMD_SYSLOG(recv)
-#undef CMD_SYSLOG
-	{ NULL, NULL }
-};
 
 /**********************************************************************
  * Syslog server thread
@@ -445,7 +450,7 @@ syslog_thread(void *priv)
 	for (i = 0; i < s->repeat; i++) {
 		if (s->repeat > 1)
 			vtc_log(s->vl, 3, "Iteration %d", i);
-		parse_string(s->spec, syslog_cmds, s, s->vl);
+		parse_string(s->vl, s, s->spec);
 		vtc_log(s->vl, 3, "shutting fd %d", s->sock);
 	}
 	VUDP_close(&s->sock);
@@ -548,7 +553,6 @@ cmd_syslog(CMD_ARGS)
 	struct syslog_srv *s;
 
 	(void)priv;
-	(void)cmd;
 
 	if (av == NULL) {
 		/* Reset and free */

@@ -40,6 +40,7 @@
 #include <unistd.h>
 
 #include "vtc.h"
+#include "vtc_log.h"
 
 #include "vav.h"
 #include "vrnd.h"
@@ -89,7 +90,7 @@ static const struct cmds global_cmds[] = {
 	{ NULL, NULL }
 };
 
-static const struct cmds cmds[] = {
+static const struct cmds top_cmds[] = {
 #define CMD_TOP(n) { #n, cmd_##n },
 #include "cmds.h"
 	{ NULL, NULL }
@@ -308,8 +309,7 @@ macro_expand(struct vtclog *vl, const char *text)
 
 
 void
-parse_string(const char *spec, const struct cmds *cmd, void *priv,
-    struct vtclog *vl)
+parse_string(struct vtclog *vl, void *priv, const char *spec)
 {
 	char *token_s[MAX_TOKENS], *token_e[MAX_TOKENS];
 	struct vsb *token_exp;
@@ -438,12 +438,13 @@ parse_string(const char *spec, const struct cmds *cmd, void *priv,
 			n = strtoul(token_s[1], NULL, 0);
 			for (m = 0; m < n; m++) {
 				vtc_log(vl, 4, "Loop #%u", m);
-				parse_string(token_s[2], cmd, priv, vl);
+				parse_string(vl, priv, token_s[2]);
 			}
 			continue;
 		}
 
-		for (cp = cmd; cp->name != NULL; cp++)
+		AN(vl->cmds);
+		for (cp = vl->cmds; cp->name != NULL; cp++)
 			if (!strcmp(token_s[0], cp->name))
 				break;
 
@@ -457,7 +458,7 @@ parse_string(const char *spec, const struct cmds *cmd, void *priv,
 			vtc_fatal(vl, "Unknown command: \"%s\"", token_s[0]);
 
 		assert(cp->cmd != NULL);
-		cp->cmd(token_s, priv, cmd, vl);
+		cp->cmd(token_s, priv, vl);
 	}
 }
 
@@ -470,7 +471,7 @@ reset_cmds(const struct cmds *cmd)
 {
 
 	for (; cmd->name != NULL; cmd++)
-		cmd->cmd(NULL, NULL, NULL, NULL);
+		cmd->cmd(NULL, NULL, NULL);
 }
 
 /**********************************************************************
@@ -492,7 +493,7 @@ fail_out(void)
 		vtc_stop = 1;
 	vtc_log(vltop, 1, "RESETTING after %s", tfn);
 	reset_cmds(global_cmds);
-	reset_cmds(cmds);
+	reset_cmds(top_cmds);
 	vtc_error |= old_err;
 
 	if (vtc_error)
@@ -525,6 +526,7 @@ exec_file(const char *fn, const char *script, const char *tmpdir,
 	vtc_loginit(logbuf, loglen);
 	vltop = vtc_logopen("top");
 	AN(vltop);
+	vtc_log_set_cmd(vltop, top_cmds);
 
 	vtc_log(vltop, 1, "TEST %s starting", fn);
 
@@ -564,6 +566,6 @@ exec_file(const char *fn, const char *script, const char *tmpdir,
 	vtc_stop = 0;
 
 	vtc_thread = pthread_self();
-	parse_string(script, cmds, NULL, vltop);
+	parse_string(vltop, NULL, script);
 	return (fail_out());
 }

@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2008-2015 Varnish Software AS
+ * Copyright (c) 2008-2011 Varnish Software AS
  * All rights reserved.
  *
  * Author: Poul-Henning Kamp <phk@phk.freebsd.dk>
@@ -28,67 +28,13 @@
  * SUCH DAMAGE.
  */
 
-#define MAX_HDR		50
 
-struct vtc_sess {
+struct vtclog {
 	unsigned		magic;
-#define VTC_SESS_MAGIC		0x932bd565
-	struct vtclog		*vl;
-	char			*name;
-	int			repeat;
-	int			keepalive;
-	int			fd;
-
-	ssize_t			rcvbuf;
-};
-
-struct http {
-	unsigned		magic;
-#define HTTP_MAGIC		0x2f02169c
-	int			*sfd;
-	struct vtc_sess		*sess;
-	int			timeout;
-	struct vtclog		*vl;
-
+#define VTCLOG_MAGIC		0x82731202
+	char			*id;
 	struct vsb		*vsb;
-
-	int			rcvbuf;
-	int			nrxbuf;
-	char			*rx_b;
-	char			*rx_p;
-	char			*rx_e;
-	char			*rem_ip;
-	char			*rem_port;
-	char			*rem_path;
-	char			*body;
-	long			bodyl;
-	char			bodylen[20];
-	char			chunklen[20];
-
-	char			*req[MAX_HDR];
-	char			*resp[MAX_HDR];
-
-	int			gziplevel;
-	int			gzipresidual;
-
-	int			head_method;
-
-	int			fatal;
-
-	/* H/2 */
-	unsigned		h2;
-	int			wf;
-
-	pthread_t		tp;
-	VTAILQ_HEAD(, stream)   streams;
 	pthread_mutex_t		mtx;
-	pthread_cond_t          cond;
-	struct hpk_ctx		*encctx;
-	struct hpk_ctx		*decctx;
-	uint64_t		iws;
-	int64_t			ws;
+	int			act;
+	const struct cmds	*cmds;
 };
-
-int http_process(struct vtclog *vl, struct vtc_sess *vsp, const char *spec,
-    int sock, int *sfd, const char *addr, int rcvbuf);
-

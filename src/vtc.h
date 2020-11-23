@@ -54,11 +54,9 @@
 	} while (0)
 
 struct vtclog;
-struct cmds;
 struct suckaddr;
 
-#define CMD_ARGS \
-    char * const *av, void *priv, const struct cmds *cmd, struct vtclog *vl
+#define CMD_ARGS char * const *av, void *priv, struct vtclog *vl
 
 typedef void cmd_f(CMD_ARGS);
 
@@ -67,8 +65,7 @@ struct cmds {
 	cmd_f		*cmd;
 };
 
-void parse_string(const char *spec, const struct cmds *cmd, void *priv,
-    struct vtclog *vl);
+void parse_string(struct vtclog *vl, void *priv, const char *spec);
 int fail_out(void);
 
 #define CMD_GLOBAL(n) cmd_f cmd_##n;
@@ -92,7 +89,7 @@ void init_syslog(void);
 struct vtc_sess *Sess_New(struct vtclog *vl, const char *name);
 void Sess_Destroy(struct vtc_sess **spp);
 int Sess_GetOpt(struct vtc_sess *, char * const **);
-int sess_process(struct vtclog *vl, const struct vtc_sess *,
+int sess_process(struct vtclog *vl, struct vtc_sess *,
     const char *spec, int sock, int *sfd, const char *addr);
 
 typedef int sess_conn_f(void *priv, struct vtclog *);
@@ -108,17 +105,14 @@ Sess_Start_Thread(
     const char *spec
 );
 
-
-int http_process(struct vtclog *vl, const char *spec, int sock, int *sfd,
-    const char *addr, int rcvbuf);
-
 char * synth_body(const char *len, int rnd);
 
 void cmd_server_gen_vcl(struct vsb *vsb);
 void cmd_server_gen_haproxy_conf(struct vsb *vsb);
 
+void vtc_log_set_cmd(struct vtclog *vl, const struct cmds *cmds);
 void vtc_loginit(char *buf, unsigned buflen);
-struct vtclog *vtc_logopen(const char *id);
+struct vtclog *vtc_logopen(const char *id, ...) v_printflike_(1, 2);
 void vtc_logclose(void *arg);
 void vtc_log(struct vtclog *vl, int lvl, const char *fmt, ...)
     v_printflike_(3, 4);

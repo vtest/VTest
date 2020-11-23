@@ -233,7 +233,7 @@ client_new(const char *name)
 	ALLOC_OBJ(c, CLIENT_MAGIC);
 	AN(c);
 	REPLACE(c->name, name);
-	c->vl = vtc_logopen(name);
+	c->vl = vtc_logopen("%s", name);
 	AN(c->vl);
 	c->vsp = Sess_New(c->vl, name);
 	AN(c->vsp);
@@ -330,7 +330,6 @@ cmd_client(CMD_ARGS)
 	struct client *c, *c2;
 
 	(void)priv;
-	(void)cmd;
 
 	if (av == NULL) {
 		/* Reset and free */

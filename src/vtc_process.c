@@ -386,7 +386,7 @@ process_new(const char *name)
 	REPLACE(p->name, name);
 	AZ(pthread_mutex_init(&p->mtx, NULL));
 
-	p->vl = vtc_logopen(name);
+	p->vl = vtc_logopen("%s", name);
 	AN(p->vl);
 
 	PROCESS_EXPAND(dir, "${tmpdir}/%s", name);
@@ -929,7 +929,6 @@ cmd_process(CMD_ARGS)
 	int spec_set = 0;
 
 	(void)priv;
-	(void)cmd;
 
 	if (av == NULL) {
 		/* Reset and free */

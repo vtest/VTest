@@ -200,7 +200,6 @@ cmd_haproxy_cli_send(CMD_ARGS)
 	struct haproxy_cli *hc;
 	int j;
 
-	(void)cmd;
 	(void)vl;
 	CAST_OBJ_NOTNULL(hc, priv, HAPROXY_CLI_MAGIC);
 	AZ(strcmp(av[0], "send"));
@@ -302,7 +301,6 @@ cmd_haproxy_cli_expect(CMD_ARGS)
 	int erroroffset, i, ret;
 	char *cmp, *spec;
 
-	(void)cmd;
 	(void)vl;
 	CAST_OBJ_NOTNULL(hc, priv, HAPROXY_CLI_MAGIC);
 	AZ(strcmp(av[0], "expect"));
@@ -366,7 +364,7 @@ haproxy_cli_thread(void *priv)
 		    "CLI failed to open %s: %s", VSB_data(vsb), err);
 	VTCP_blocking(fd);
 	hc->sock = fd;
-	parse_string(hc->spec, haproxy_cli_cmds, hc, hc->vl);
+	parse_string(hc->vl, hc, hc->spec);
 	vtc_log(hc->vl, 2, "CLI ending");
 	VSB_destroy(&vsb);
 	return (NULL);
@@ -478,6 +476,7 @@ haproxy_cli_new(struct haproxy *h)
 	AN(hc);
 
 	hc->vl = h->vl;
+	vtc_log_set_cmd(hc->vl, haproxy_cli_cmds);
 	hc->sock = -1;
 	bprintf(hc->connect, "${%s_cli_sock}", h->name);
 
@@ -500,6 +499,7 @@ haproxy_mcli_new(struct haproxy *h)
 	AN(hc);
 
 	hc->vl = h->vl;
+	vtc_log_set_cmd(hc->vl, haproxy_cli_cmds);
 	hc->sock = -1;
 	bprintf(hc->connect, "${%s_mcli_sock}", h->name);
 
@@ -565,7 +565,8 @@ haproxy_new(const char *name)
 
 	h->args = VSB_new_auto();
 
-	h->vl = vtc_logopen(name);
+	h->vl = vtc_logopen("%s", name);
+	vtc_log_set_cmd(h->vl, haproxy_cli_cmds);
 	AN(h->vl);
 
 	h->filename = getenv(HAPROXY_PROGRAM_ENV_VAR);
@@ -1009,7 +1010,6 @@ cmd_haproxy(CMD_ARGS)
 	struct haproxy *h, *h2;
 
 	(void)priv;
-	(void)cmd;
 
 	if (av == NULL) {
 		/* Reset and free */

@@ -48,6 +48,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <stdlib.h>
 
 #include "vdef.h"
 #include "vas.h"
@@ -72,7 +73,9 @@ vtcp_sa_to_ascii(const void *sa, socklen_t l, char *abuf, unsigned alen,
 		 * XXX this printf is shitty, but we may not have space
 		 * for the gai_strerror in the bufffer :-(
 		 */
-		printf("getnameinfo = %d %s\n", i, gai_strerror(i));
+		fprintf(stderr, "getnameinfo = %d %s\n", i, gai_strerror(i));
+		if (i == EAI_SYSTEM)
+			fprintf(stderr, "errno = %d %s\n", errno, vstrerror(errno));
 		if (abuf != NULL)
 			(void)snprintf(abuf, alen, "Conversion");
 		if (pbuf != NULL)
@@ -105,12 +108,11 @@ VTCP_name(const struct suckaddr *addr, char *abuf, unsigned alen,
 struct suckaddr *
 VTCP_my_suckaddr(int sock)
 {
-	struct sockaddr_storage addr_s;
-	socklen_t l;
+	struct suckaddr *r;
 
-	l = sizeof addr_s;
-	AZ(getsockname(sock, (void *)&addr_s, &l));
-	return (VSA_Malloc(&addr_s, l));
+	r = malloc(vsa_suckaddr_len);
+	AN(VSA_getsockname(sock, r, vsa_suckaddr_len));
+	return (r);
 }
 
 /*--------------------------------------------------------------------*/
@@ -118,12 +120,10 @@ VTCP_my_suckaddr(int sock)
 void
 VTCP_myname(int sock, char *abuf, unsigned alen, char *pbuf, unsigned plen)
 {
-	struct sockaddr_storage addr_s;
-	socklen_t l;
+	char buf[vsa_suckaddr_len];
 
-	l = sizeof addr_s;
-	AZ(getsockname(sock, (void *)&addr_s, &l));
-	vtcp_sa_to_ascii(&addr_s, l, abuf, alen, pbuf, plen);
+	VTCP_name(VSA_getsockname(sock, buf, sizeof buf),
+		  abuf, alen, pbuf, plen);
 }
 
 /*--------------------------------------------------------------------*/
@@ -131,12 +131,12 @@ VTCP_myname(int sock, char *abuf, unsigned alen, char *pbuf, unsigned plen)
 void
 VTCP_hisname(int sock, char *abuf, unsigned alen, char *pbuf, unsigned plen)
 {
-	struct sockaddr_storage addr_s;
-	socklen_t l;
+	char buf[vsa_suckaddr_len];
+	struct suckaddr *sua;
 
-	l = sizeof addr_s;
-	if (!getpeername(sock, (void*)&addr_s, &l))
-		vtcp_sa_to_ascii(&addr_s, l, abuf, alen, pbuf, plen);
+	sua = VSA_getpeername(sock, buf, sizeof buf);
+	if (sua != NULL)
+		VTCP_name(sua, abuf, alen, pbuf, plen);
 	else {
 		(void)snprintf(abuf, alen, "<none>");
 		(void)snprintf(pbuf, plen, "<none>");

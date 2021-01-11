@@ -42,6 +42,7 @@
 
 
 #include <errno.h>
+#include <stddef.h>	// size_t
 
 const char * vstrerror(int e);
 
@@ -116,5 +117,18 @@ do {									\
 #   define ___v_static_assert(x, y) \
 		typedef char __vassert_## y[(x) ? 1 : -1] v_unused_
 #endif
+
+/*
+ * A normal pointer difference is signed, but when we don't want a negative
+ * value this little tool will make sure we don't get that.
+ */
+
+static inline size_t
+pdiff(const void *b, const void *e)
+{
+
+	assert(b <= e);
+	return ((size_t)((const char *)e - (const char *)b));
+}
 
 #endif

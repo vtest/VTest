@@ -157,8 +157,9 @@ cmd_shell_engine(struct vtclog *vl, int ok, const char *cmd,
 	if (re != NULL) {
 		vre = VRE_compile(re, 0, &errptr, &err);
 		if (vre == NULL)
-			vtc_fatal(vl, "shell_match invalid regexp (\"%s\")",
-			    re);
+			vtc_fatal(vl,
+			    "shell_match invalid regexp (\"%s\" at %d)",
+			    errptr, err);
 	}
 	VSB_printf(vsb, "exec 2>&1 ; %s", cmd);
 	AZ(VSB_finish(vsb));
@@ -387,6 +388,20 @@ ipvx_works(const char *target)
 	return (0);
 }
 
+/**********************************************************************/
+
+static int
+addr_no_randomize_works(void)
+{
+	int r = 0;
+
+#ifdef HAVE_SYS_PERSONALITY_H
+	r = personality(0xffffffff);
+	r = personality(r | ADDR_NO_RANDOMIZE);
+#endif
+	return (r >= 0);
+}
+
 /* SECTION: feature feature
  *
  * Test that the required feature(s) for a test are available, and skip
@@ -398,9 +413,9 @@ ipvx_works(const char *target)
  * 64bit
  *        The environment is 64 bits
  * ipv4
- *	  127.0.0.1 work
+ *        127.0.0.1 works
  * ipv6
- *	  [::1] work
+ *        [::1] works
  * dns
  *        DNS lookups are working
  * topbuild
@@ -420,6 +435,11 @@ ipvx_works(const char *target)
  *        recognized as a macro.
  * persistent_storage
  *        Varnish was built with the deprecated persistent storage.
+ * sanitizer
+ *        Varnish was built with a sanitizer.
+ *
+ * A feature name can be prefixed with an exclamation mark (!) to skip a
+ * test if a feature is present.
  *
  * Be careful with ignore_unknown_macro, because it may cause a test with a
  * misspelled macro to fail silently. You should only need it if you must
@@ -432,11 +452,23 @@ static const unsigned with_persistent_storage = 1;
 static const unsigned with_persistent_storage = 0;
 #endif
 
+#if __SANITIZER
+static const unsigned sanitizer = 1;
+#else
+static const unsigned sanitizer = 0;
+#endif
+
+#ifdef SO_RCVTIMEO_WORKS
+static const unsigned so_rcvtimeo_works = 1;
+#else
+static const unsigned so_rcvtimeo_works = 0;
+#endif
+
 void v_matchproto_(cmd_f)
 cmd_feature(CMD_ARGS)
 {
-	int r;
-	int good;
+	const char *feat;
+	int r, good, skip, neg;
 
 	(void)priv;
 
@@ -445,29 +477,33 @@ cmd_feature(CMD_ARGS)
 
 #define FEATURE(nm, tst)				\
 	do {						\
-		if (!strcmp(*av, nm)) {			\
+		if (!strcmp(feat, nm)) {		\
+			good = 1;			\
 			if (tst) {			\
-				good = 1;		\
+				skip = neg;		\
 			} else {			\
-				vtc_stop = 2;		\
+				skip = !neg;		\
 			}				\
 		}					\
 	} while (0)
 
+	skip = 0;
+
 	for (av++; *av != NULL; av++) {
 		good = 0;
-		if (!strcmp(*av, "SO_RCVTIMEO_WORKS")) {
-#ifdef SO_RCVTIMEO_WORKS
-			good = 1;
-#else
-			vtc_stop = 2;
-#endif
+		neg = 0;
+		feat = *av;
+
+		if (feat[0] == '!') {
+			neg = 1;
+			feat++;
 		}
 
 		FEATURE("ipv4", ipvx_works("127.0.0.1"));
 		FEATURE("ipv6", ipvx_works("[::1]"));
 		FEATURE("pcre_jit", VRE_has_jit);
 		FEATURE("64bit", sizeof(void*) == 8);
+		FEATURE("disable_aslr", addr_no_randomize_works());
 		FEATURE("dns", dns_works());
 		FEATURE("topbuild", iflg);
 		FEATURE("root", !geteuid());
@@ -475,38 +511,35 @@ cmd_feature(CMD_ARGS)
 		FEATURE("user_vcache", getpwnam("vcache") != NULL);
 		FEATURE("group_varnish", getgrnam("varnish") != NULL);
 		FEATURE("persistent_storage", with_persistent_storage);
+		FEATURE("sanitizer", sanitizer);
+		FEATURE("SO_RCVTIMEO_WORKS", so_rcvtimeo_works);
 
-		if (!strcmp(*av, "disable_aslr")) {
+		if (!strcmp(feat, "cmd")) {
 			good = 1;
-#ifdef HAVE_SYS_PERSONALITY_H
-			r = personality(0xffffffff);
-			r = personality(r | ADDR_NO_RANDOMIZE);
-			if (r < 0) {
-				good = 0;
-				vtc_stop = 2;
-			}
-#endif
-		} else if (!strcmp(*av, "cmd")) {
+			skip = neg;
 			av++;
 			if (*av == NULL)
 				vtc_fatal(vl, "Missing the command-line");
 			r = system(*av);
-			if (WEXITSTATUS(r) == 0)
-				good = 1;
-			else
-				vtc_stop = 2;
-		} else if (!strcmp(*av, "ignore_unknown_macro")) {
+			if (WEXITSTATUS(r) != 0)
+				skip = !neg;
+		} else if (!strcmp(feat, "ignore_unknown_macro")) {
 			ign_unknown_macro = 1;
 			good = 1;
 		}
-		if (good)
+		if (!good)
+			vtc_fatal(vl, "FAIL test, unknown feature: %s", feat);
+
+		if (!skip)
 			continue;
 
-		if (!vtc_stop)
-			vtc_fatal(vl, "FAIL test, unknown feature: %s", *av);
+		vtc_stop = 2;
+		if (neg)
+			vtc_log(vl, 1,
+			    "SKIPPING test, conflicting feature: %s", feat);
 		else
 			vtc_log(vl, 1,
-			    "SKIPPING test, lacking feature: %s", *av);
+			    "SKIPPING test, lacking feature: %s", feat);
 		return;
 	}
 }

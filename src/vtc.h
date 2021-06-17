@@ -85,6 +85,7 @@ extern const char *default_listen_addr;
 
 void init_server(void);
 void init_syslog(void);
+void init_tunnel(void);
 
 /* Sessions */
 struct vtc_sess *Sess_New(struct vtclog *vl, const char *name);

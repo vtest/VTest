@@ -58,14 +58,6 @@
 #include "vtcp.h"
 #include "vtim.h"
 
-#ifndef __SANITIZE_ADDRESS__
-#ifdef __clang__
-#if __has_feature(address_sanitizer)
-#define __SANITIZE_ADDRESS__
-#endif
-#endif
-#endif
-
 /*--------------------------------------------------------------------*/
 static void
 vtcp_sa_to_ascii(const void *sa, socklen_t l, char *abuf, unsigned alen,
@@ -637,7 +629,7 @@ VTCP_Check(ssize_t a)
 	if (errno == EINVAL)
 		return (1);
 #endif
-#ifdef __SANITIZE_ADDRESS__
+#if (defined(__SANITIZER) || __has_feature(address_sanitizer))
 	if (errno == EINTR)
 		return (1);
 #endif

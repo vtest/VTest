@@ -134,13 +134,14 @@ void macro_undef(struct vtclog *vl, const char *instance, const char *name);
 void macro_def(struct vtclog *vl, const char *instance, const char *name,
     const char *fmt, ...)
     v_printflike_(4, 5);
-char *macro_get(const char *, const char *);
+void macro_cat(struct vtclog *, struct vsb *, const char *, const char *);
 struct vsb *macro_expand(struct vtclog *vl, const char *text);
 struct vsb *macro_expandf(struct vtclog *vl, const char *, ...)
     v_printflike_(2, 3);
 
-void extmacro_def(const char *name, const char *fmt, ...)
-    v_printflike_(2, 3);
+typedef char* macro_f(int, char *const *, const char **);
+void extmacro_def(const char *name, macro_f *func, const char *fmt, ...)
+    v_printflike_(3, 4);
 
 struct http;
 void cmd_stream(CMD_ARGS);

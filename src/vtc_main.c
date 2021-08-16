@@ -167,7 +167,7 @@ parse_D_opt(char *arg)
 	if (!q)
 		return (0);
 	*q++ = '\0';
-	extmacro_def(p, "%s", q);
+	extmacro_def(p, NULL, "%s", q);
 
 	return (1);
 }
@@ -544,7 +544,7 @@ i_mode(void)
 
 	}
 	AN(topbuild);
-	extmacro_def("topbuild", "%s", topbuild);
+	extmacro_def("topbuild", NULL, "%s", topbuild);
 
 	/*
 	 * Build $PATH which can find all programs in the build tree
@@ -605,7 +605,7 @@ ip_magic(void)
 	}
 	assert(bad_backend_fd >= 0);
 	VTCP_myname(bad_backend_fd, abuf, sizeof abuf, pbuf, sizeof(pbuf));
-	extmacro_def("localhost", "%s", abuf);
+	extmacro_def("localhost", NULL, "%s", abuf);
 	s = strdup(abuf);
 	AN(s);
 
@@ -620,9 +620,9 @@ ip_magic(void)
 
 	/* Expose a backend that is forever down. */
 	if (VSA_Get_Proto(sa) == AF_INET)
-		extmacro_def("bad_backend", "%s:%s", abuf, pbuf);
+		extmacro_def("bad_backend", NULL, "%s:%s", abuf, pbuf);
 	else
-		extmacro_def("bad_backend", "[%s]:%s", abuf, pbuf);
+		extmacro_def("bad_backend", NULL, "[%s]:%s", abuf, pbuf);
 
 	/* our default bind/listen address */
 	if (VSA_Get_Proto(sa) == AF_INET)
@@ -631,7 +631,7 @@ ip_magic(void)
 		bprintf(abuf, "[%s]:0", s);
 	free(s);
 
-	extmacro_def("listen_addr", "%s", abuf);
+	extmacro_def("listen_addr", NULL, "%s", abuf);
 	default_listen_addr = strdup(abuf);
 	AN(default_listen_addr);
 	free(sa);
@@ -644,7 +644,91 @@ ip_magic(void)
 	 * check your /proc/sys/net/ipv4/ip_nonlocal_bind setting.
 	 */
 
-	extmacro_def("bad_ip", "%s", "192.0.2.255");
+	extmacro_def("bad_ip", NULL, "%s", "192.0.2.255");
+}
+
+/**********************************************************************
+ * Macros
+ */
+
+static char * v_matchproto_(macro_f)
+macro_func_date(int argc, char *const *argv, const char **err)
+{
+	double t;
+	char *s;
+
+	assert(argc >= 2);
+	AN(argv);
+	AN(err);
+
+	if (argc > 2) {
+		*err = "macro does not take arguments";
+		return (NULL);
+	}
+
+	t = VTIM_real();
+	s = malloc(VTIM_FORMAT_SIZE);
+	AN(s);
+	VTIM_format(t, s);
+	return (s);
+}
+
+static char *
+macro_func_string_repeat(int argc, char *const *argv, const char **err)
+{
+	struct vsb vsb[1];
+	const char *p;
+	char *res;
+	size_t l;
+	int i;
+
+	if (argc != 4) {
+		*err = "repeat takes 2 arguments";
+		return (NULL);
+	}
+
+	p = argv[2];
+	i = SF_Parse_Integer(&p, err);
+
+	if (*err != NULL)
+		return (NULL);
+
+	if (*p != '\0' || i < 0) {
+		*err = "invalid number of repetitions";
+		return (NULL);
+	}
+
+	l = (strlen(argv[3]) * i) + 1;
+	res = malloc(l);
+	AN(res);
+	AN(VSB_init(vsb, res, l));
+	while (i > 0) {
+		AZ(VSB_cat(vsb, argv[3]));
+		i--;
+	}
+	AZ(VSB_finish(vsb));
+	VSB_fini(vsb);
+	return (res);
+}
+
+static char *
+macro_func_string(int argc, char *const *argv, const char **err)
+{
+
+	assert(argc >= 2);
+	AN(argv);
+	AN(err);
+
+	if (argc == 2) {
+		*err = "missing action";
+		return (NULL);
+	}
+
+	if (!strcmp(argv[2], "repeat"))
+		return (macro_func_string_repeat(argc - 1, argv + 1, err));
+
+	*err = "unknown action";
+	return (NULL);
 }
 
 /**********************************************************************
@@ -725,7 +809,10 @@ main(int argc, char * const *argv)
 		tmppath = strdup("/tmp");
 
 	cwd = getcwd(buf, sizeof buf);
-	extmacro_def("pwd", "%s", cwd);
+	extmacro_def("pwd", NULL, "%s", cwd);
+
+	extmacro_def("date", macro_func_date, NULL);
+	extmacro_def("string", macro_func_string, NULL);
 
 	vmod_path = NULL;
 

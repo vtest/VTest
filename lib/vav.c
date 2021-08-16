@@ -52,12 +52,20 @@
 #include "vas.h"
 #include "vav.h"
 
-int
-VAV_BackSlash(const char *s, char *res)
+static int
+vav_backslash_txt(const char *s, const char *e, char *res)
 {
-	int r;
+	int r, l;
 	char c;
 	unsigned u;
+
+	AN(s);
+	if (e == NULL)
+		e = strchr(s, '\0');
+
+	l = pdiff(s, e);
+	if (l < 2)
+		return (0);
 
 	assert(*s == '\\');
 	r = c = 0;
@@ -84,7 +92,7 @@ VAV_BackSlash(const char *s, char *res)
 		break;
 	case '0': case '1': case '2': case '3':
 	case '4': case '5': case '6': case '7':
-		for (r = 1; r < 4; r++) {
+		for (r = 1; r < 4 && r < l; r++) {
 			if (!isdigit(s[r]))
 				break;
 			if (s[r] - '0' > 7)
@@ -94,7 +102,8 @@ VAV_BackSlash(const char *s, char *res)
 		}
 		break;
 	case 'x':
-		if (1 == sscanf(s + 1, "x%02x", &u)) {
+		if (l >= 4 && isxdigit(s[2]) && isxdigit(s[3]) &&
+		    sscanf(s + 1, "x%02x", &u) == 1) {
 			AZ(u & ~0xff);
 			c = u;	/*lint !e734 loss of precision */
 			r = 4;
@@ -106,6 +115,13 @@ VAV_BackSlash(const char *s, char *res)
 	if (res != NULL)
 		*res = c;
 	return (r);
+}
+
+int
+VAV_BackSlash(const char *s, char *res)
+{
+
+	return (vav_backslash_txt(s, NULL, res));
 }
 
 char *
@@ -126,7 +142,12 @@ VAV_BackSlashDecode(const char *s, const char *e)
 			*r++ = *q++;
 			continue;
 		}
-		i = VAV_BackSlash(q, r);
+		i = vav_backslash_txt(q, e, r);
+		if (i == 0) {
+			free(p);
+			errno = EINVAL;
+			return (NULL);
+		}
 		q += i;
 		r++;
 	}
@@ -135,85 +156,125 @@ VAV_BackSlashDecode(const char *s, const char *e)
 }
 
 static char err_invalid_backslash[] = "Invalid backslash sequence";
+static char err_invalid_quote[] = "Invalid '\"'";
 static char err_missing_quote[] = "Missing '\"'";
+static char err_missing_separator[] = "Missing separator between arguments";
 
 char **
-VAV_Parse(const char *s, int *argc, int flag)
+VAV_ParseTxt(const char *b, const char *e, int *argc, int flag)
 {
 	char **argv;
-	const char *p;
+	const char *p, *sep;
 	int nargv, largv;
 	int i, quote;
 
-	assert(s != NULL);
+	AN(b);
+	if (e == NULL)
+		e = strchr(b, '\0');
+	sep = NULL;
+	quote = 0;
 	nargv = 1;
 	largv = 16;
 	argv = calloc(largv, sizeof *argv);
 	if (argv == NULL)
 		return (NULL);
 
-	for (;;) {
-		if (*s == '\0')
-			break;
-		if (isspace(*s)) {
-			s++;
+	while (b < e) {
+		if (isspace(*b)) {
+			b++;
 			continue;
 		}
-		if ((flag & ARGV_COMMENT) && *s == '#')
+		if (sep != NULL && isspace(*sep) &&
+		    *b == ',' && (flag & ARGV_COMMA)) {
+			sep = NULL;
+			b++;
+			continue;
+		}
+		if (sep != NULL && *sep == '"' && *b == '"') {
+			argv[0] = err_missing_separator;
+			return (argv);
+		}
+		sep = NULL;
+		if ((flag & ARGV_COMMENT) && *b == '#')
 			break;
-		if (*s == '"' && !(flag & ARGV_NOESC)) {
-			p = ++s;
+		if (*b == '"' && !(flag & ARGV_NOESC)) {
+			p = ++b;
 			quote = 1;
 		} else {
-			p = s;
+			p = b;
 			quote = 0;
 		}
-		while (1) {
-			if (*s == '\\' && !(flag & ARGV_NOESC)) {
-				i = VAV_BackSlash(s, NULL);
+		while (b < e) {
+			if (*b == '\\' && !(flag & ARGV_NOESC)) {
+				i = vav_backslash_txt(b, e, NULL);
 				if (i == 0) {
 					argv[0] = err_invalid_backslash;
 					return (argv);
 				}
-				s += i;
+				b += i;
 				continue;
 			}
 			if (!quote) {
-				if (*s == '\0' || isspace(*s))
+				if (isspace(*b)) {
+					sep = b;
 					break;
-				if ((flag & ARGV_COMMA) && *s == ',')
+				}
+				if ((flag & ARGV_COMMA) && *b == ',') {
+					sep = b;
 					break;
-				s++;
+				}
+				if (!(flag & ARGV_NOESC) && *b == '"') {
+					argv[0] = err_invalid_quote;
+					return (argv);
+				}
+				b++;
 				continue;
 			}
-			if (*s == '"' && !(flag & ARGV_NOESC))
+			if (*b == '"' && !(flag & ARGV_NOESC)) {
+				sep = b;
+				quote = 0;
 				break;
-			if (*s == '\0') {
-				argv[0] = err_missing_quote;
-				return (argv);
 			}
-			s++;
+			b++;
 		}
-		if (nargv + 1 >= largv) {
+		if (sep == NULL && quote) {
+			argv[0] = err_missing_quote;
+			return (argv);
+		}
+		/* Ensure slots for 1 new arg plus 1 trailing arg */
+		if (nargv + 2 >= largv) {
 			argv = realloc(argv, sizeof (*argv) * (largv += largv));
 			assert(argv != NULL);
 		}
 		if (flag & ARGV_NOESC) {
-			argv[nargv] = malloc(1L + (s - p));
+			argv[nargv] = malloc(1L + (b - p));
 			assert(argv[nargv] != NULL);
-			memcpy(argv[nargv], p, s - p);
-			argv[nargv][s - p] = '\0';
-			nargv++;
+			memcpy(argv[nargv], p, b - p);
+			argv[nargv][b - p] = '\0';
 		} else {
-			argv[nargv++] = VAV_BackSlashDecode(p, s);
+			argv[nargv] = VAV_BackSlashDecode(p, b);
+			assert(argv[nargv] != NULL);
 		}
-		if (*s != '\0')
-			s++;
+		nargv++;
+		if (b < e)
+			b++;
+	}
+	if (sep != NULL && *sep == ',') {
+		argv[nargv] = strdup("");
+		assert(argv[nargv] != NULL);
+		nargv++;
 	}
 	argv[nargv] = NULL;
 	if (argc != NULL)
 		*argc = nargv;
 	return (argv);
+}
+
+char **
+VAV_Parse(const char *s, int *argc, int flag)
+{
+
+	return (VAV_ParseTxt(s, NULL, argc, flag));
 }
 
 void
@@ -294,3 +355,133 @@ main(int argc, char **argv)
 	return (0);
 }
 #endif
+
+#ifdef TEST_DRIVER
+#  include <stdio.h>
+
+struct test_case {
+	int		flag;
+	const char	*str;
+	const char	**argv;
+};
+
+static const struct test_case *tests[] = {
+#define TEST_PASS(flag, str, ...)					\
+	&(const struct test_case){flag, str,				\
+	    (const char **)&(const void *[]){NULL, __VA_ARGS__, NULL}}
+#define TEST_FAIL(flag, str, err)					\
+	&(const struct test_case){flag, str,				\
+	    (const char **)&(const void *[]){err_ ## err, NULL}}
+#define K ARGV_COMMENT
+#define C ARGV_COMMA
+#define N ARGV_NOESC
+	TEST_PASS(K|C|N, "", NULL),
+	TEST_PASS(0    , "foo", "foo"),
+	TEST_PASS(0    , "foo bar", "foo", "bar"),
+	TEST_PASS(  C  , "foo bar", "foo", "bar"),
+	TEST_PASS(  C  , "foo,bar", "foo", "bar"),
+	TEST_PASS(0    , "  foo  bar  ", "foo", "bar"),
+	TEST_PASS(  C  , "  foo  ,  bar  ", "foo", "bar"),
+	TEST_PASS(  C  , "foo bar ", "foo", "bar"),
+	TEST_PASS(  C  , "foo,bar,", "foo", "bar", ""),
+	TEST_PASS(0    , "foo \"bar baz\"", "foo", "bar baz"),
+	TEST_PASS(0    , "foo #bar", "foo", "#bar"),
+	TEST_PASS(K    , "foo #bar", "foo"),
+	TEST_PASS(0    , "foo#bar", "foo#bar"),
+	TEST_PASS(K    , "foo#bar", "foo#bar"),
+	TEST_PASS(    N, "\\", "\\"),
+	TEST_FAIL(0    , "\\", invalid_backslash),
+	TEST_FAIL(0    , "\\x", invalid_backslash),
+	TEST_FAIL(0    , "\\x2", invalid_backslash),
+	TEST_FAIL(0    , "\\x2O", invalid_backslash),
+	TEST_PASS(0    , "\\x20", " "),
+	TEST_FAIL(0    , "\"foo", missing_quote),
+	TEST_PASS(    N, "foo\"bar", "foo\"bar"),
+	TEST_FAIL(0    , "foo\"bar", invalid_quote),
+	TEST_FAIL(0    , "foo\"bar", invalid_quote),
+	TEST_PASS(    N, "\"foo\"\"bar\"", "\"foo\"\"bar\""),
+	TEST_FAIL(0    , "\"foo\"\"bar\"", missing_separator),
+	NULL
+#undef N
+#undef C
+#undef K
+#undef TEST_FAIL
+#undef TEST_PASS
+};
+
+static char **
+test_run(const struct test_case *tc, int *ret)
+{
+	const char *exp, *act;
+	char **argv, *tmp;
+	int argc, i;
+
+	i = strlen(tc->str);
+	if (i == 0) {
+		argv = VAV_Parse(tc->str, &argc, tc->flag);
+	} else {
+		tmp = malloc(i); /* sanitizer-friendly */
+		AN(tmp);
+		memcpy(tmp, tc->str, i);
+		argv = VAV_ParseTxt(tmp, tmp + i, &argc, tc->flag);
+		free(tmp);
+	}
+	AN(argv);
+
+	if (tc->argv[0] != argv[0]) {
+		exp = tc->argv[0] != NULL ? tc->argv[0] : "success";
+		act = argv[0] != NULL ? argv[0] : "success";
+		printf(
+		    "ERROR: Parsing string <%s> with flags %x, "
+		    "expected <%s> got <%s>.\n",
+		    tc->str, tc->flag, exp, act);
+		*ret = 1;
+		return (argv);
+	}
+
+	if (tc->argv[0] != NULL)
+		return (argv);
+
+	for (i = 1; i < argc && tc->argv[i] != NULL && argv[i] != NULL; i++) {
+		if (!strcmp(tc->argv[i], argv[i]))
+			continue;
+		printf(
+		    "ERROR: Parsing string <%s> with flags %x, "
+		    "expected <%s> for argv[%d] got <%s>.\n",
+		    tc->str, tc->flag, tc->argv[i], i, argv[i]);
+		*ret = 1;
+		return (argv);
+	}
+
+	if (tc->argv[i] != NULL || argv[i] != NULL) {
+		act = i < argc ? "less" : "more";
+		printf(
+		    "ERROR: Parsing string <%s> with flags %x, "
+		    "got %s arguments (%d) than expected.\n",
+		    tc->str, tc->flag, act, argc);
+		*ret = 1;
+		return (argv);
+	}
+
+	exp = tc->argv[0] == NULL ? "PASS" : "FAIL";
+	printf("%s: <%s> with flags %x as expected.\n", exp, tc->str, tc->flag);
+	return (argv);
+}
+
+int
+main(int argc, char **argv)
+{
+	const struct test_case **tc;
+	int ret = 0;
+
+	(void)argc;
+	(void)argv;
+
+	for (tc = tests; ret == 0 && *tc != NULL; tc++) {
+		argv = test_run(*tc, &ret);
+		VAV_Free(argv);
+	}
+
+	return (0);
+}
+#endif /* TEST_DRIVER */

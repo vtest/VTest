@@ -394,8 +394,7 @@ logexp_match(const struct logexp *le, struct logexp_test *test,
 	if (test->vre &&
 	    test->tag >= 0 &&
 	    test->tag == tag &&
-	    VRE_ERROR_NOMATCH == VRE_exec(test->vre, data,
-		len, 0, 0, NULL, 0, NULL))
+	    VRE_ERROR_NOMATCH == VRE_match(test->vre, data, len, 0, NULL))
 		ok = 0;
 
 	alt = (test->skip_max == LE_ALT);
@@ -545,7 +544,7 @@ logexp_thread(void *priv)
 	if (le->query != NULL)
 		vtc_log(le->vl, 4, "qry| %s", le->query);
 	logexp_next(le);
-	while (! logexp_done(le)) {
+	while (!logexp_done(le) && !vtc_stop && !vtc_error) {
 		i = VSLQ_Dispatch(le->vslq, logexp_dispatch, le);
 		if (i == 2 && le->err_arg) {
 			vtc_log(le->vl, 4, "end| failed as expected");
@@ -558,6 +557,8 @@ logexp_thread(void *priv)
 		else if (i == 0 && ! logexp_done(le))
 			VTIM_sleep(0.01);
 	}
+	if (!logexp_done(le))
+		vtc_fatal(le->vl, "bad| outstanding expectations");
 	vtc_log(le->vl, 4, "end|");
 
 	return (NULL);
@@ -623,13 +624,11 @@ static void
 cmd_logexp_common(struct logexp *le, struct vtclog *vl,
     int skip_max, char * const *av)
 {
-	int vxid;
-	int tag;
 	vre_t *vre;
-	const char *err;
-	int pos;
+	struct vsb vsb[1];
+	int err, pos, tag, vxid;
 	struct logexp_test *test;
-	char *end;
+	char *end, errbuf[VRE_ERROR_LEN];
 
 	if (!strcmp(av[2], "*"))
 		vxid = LE_ANY;
@@ -651,10 +650,15 @@ cmd_logexp_common(struct logexp *le, struct vtclog *vl,
 	}
 	vre = NULL;
 	if (av[4]) {
-		vre = VRE_compile(av[4], 0, &err, &pos);
-		if (vre == NULL)
+		vre = VRE_compile(av[4], 0, &err, &pos, 1);
+		if (vre == NULL) {
+			AN(VSB_init(vsb, errbuf, sizeof errbuf));
+			AZ(VRE_error(vsb, err));
+			AZ(VSB_finish(vsb));
+			VSB_fini(vsb);
 			vtc_fatal(vl, "Regex error (%s): '%s' pos %d",
-			    err, av[4], pos);
+			    errbuf, av[4], pos);
+		}
 	}
 
 	ALLOC_OBJ(test, LOGEXP_TEST_MAGIC);

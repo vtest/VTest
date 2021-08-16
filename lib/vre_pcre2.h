@@ -1,8 +1,8 @@
 /*-
- * Copyright (c) 2009 Varnish Software AS
+ * Copyright (c) 2021 Varnish Software AS
  * All rights reserved.
  *
- * Author: Tollef Fog Heen <tfheen@redpill-linpro.com>
+ * Author: Dridi Boukelmoune <dridi.boukelmoune@gmail.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  *
@@ -27,42 +27,21 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * Regular expression support
- *
- * We wrap PCRE2 in VRE to make to make it feasible to use something else
- * without hunting down stuff through out the Varnish source code.
+ * Access to the PCRE2 backend in VRE
  *
  */
 
 #ifndef VRE_H_INCLUDED
-#define VRE_H_INCLUDED
+#error Include vre.h before vre_pcre2.h
+#endif
 
-#define VRE_ERROR_LEN	128
+#ifndef VRE_PCRE2_H_INCLUDED
+#define VRE_PCRE2_H_INCLUDED
 
-struct vre;
-struct vsb;
+#define PCRE2_CODE_UNIT_WIDTH 8
 
-struct vre_limits {
-	unsigned	match;
-	unsigned	depth;
-};
+#include <pcre2.h>
 
-typedef struct vre vre_t;
+pcre2_code *VRE_unpack(const vre_t *code);
 
-/* This maps to PCRE2 error codes */
-extern const int VRE_ERROR_NOMATCH;
-
-/* And those to PCRE2 options */
-extern const unsigned VRE_CASELESS;
-
-vre_t *VRE_compile(const char *, unsigned, int *, int *, unsigned);
-vre_t *VRE_export(const vre_t *, size_t *);
-int VRE_error(struct vsb *, int err);
-int VRE_match(const vre_t *code, const char *subject, size_t length,
-    int options, const volatile struct vre_limits *lim);
-int VRE_sub(const vre_t *code, const char *subject, const char *replacement,
-    struct vsb *vsb, const volatile struct vre_limits *lim, int all);
-void VRE_free(vre_t **);
-void VRE_quote(struct vsb *, const char *);
-
-#endif /* VRE_H_INCLUDED */
+#endif /* VRE_PCRE2_H_INCLUDED */

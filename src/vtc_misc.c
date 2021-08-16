@@ -143,23 +143,28 @@ static void
 cmd_shell_engine(struct vtclog *vl, int ok, const char *cmd,
     const char *expect, const char *re)
 {
-	struct vsb *vsb;
+	struct vsb *vsb, re_vsb[1];
 	FILE *fp;
 	vre_t *vre = NULL;
-	const char *errptr;
 	int r, c;
-	int err;
+	int err, erroff;
+	char errbuf[VRE_ERROR_LEN];
 
 	AN(vl);
 	AN(cmd);
 	vsb = VSB_new_auto();
 	AN(vsb);
 	if (re != NULL) {
-		vre = VRE_compile(re, 0, &errptr, &err);
-		if (vre == NULL)
+		vre = VRE_compile(re, 0, &err, &erroff, 1);
+		if (vre == NULL) {
+			AN(VSB_init(re_vsb, errbuf, sizeof errbuf));
+			AZ(VRE_error(re_vsb, err));
+			AZ(VSB_finish(re_vsb));
+			VSB_fini(re_vsb);
 			vtc_fatal(vl,
 			    "shell_match invalid regexp (\"%s\" at %d)",
-			    errptr, err);
+			    errbuf, erroff);
+		}
 	}
 	VSB_printf(vsb, "exec 2>&1 ; %s", cmd);
 	AZ(VSB_finish(vsb));
@@ -193,10 +198,8 @@ cmd_shell_engine(struct vtclog *vl, int ok, const char *cmd,
 		else
 			vtc_log(vl, 4, "shell_expect found");
 	} else if (vre != NULL) {
-		if (VRE_exec(vre, VSB_data(vsb), VSB_len(vsb), 0, 0,
-		    NULL, 0, NULL) < 1)
-			vtc_fatal(vl,
-			    "shell_match failed: (\"%s\")", re);
+		if (VRE_match(vre, VSB_data(vsb), VSB_len(vsb), 0, NULL) < 1)
+			vtc_fatal(vl, "shell_match failed: (\"%s\")", re);
 		else
 			vtc_log(vl, 4, "shell_match succeeded");
 		VRE_free(&vre);
@@ -501,7 +504,6 @@ cmd_feature(CMD_ARGS)
 
 		FEATURE("ipv4", ipvx_works("127.0.0.1"));
 		FEATURE("ipv6", ipvx_works("[::1]"));
-		FEATURE("pcre_jit", VRE_has_jit);
 		FEATURE("64bit", sizeof(void*) == 8);
 		FEATURE("disable_aslr", addr_no_randomize_works());
 		FEATURE("dns", dns_works());

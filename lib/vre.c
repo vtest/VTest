@@ -30,7 +30,7 @@
 
 #include "config.h"
 
-#include <pcre.h>
+#include <ctype.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -41,106 +41,254 @@
 #include "miniobj.h"
 
 #include "vre.h"
+#include "vre_pcre2.h"
 
-#if defined(USE_PCRE_JIT)
-#define VRE_STUDY_JIT_COMPILE PCRE_STUDY_JIT_COMPILE
-#else
-#define VRE_STUDY_JIT_COMPILE 0
+#ifndef pcre2_set_depth_limit
+#  define pcre2_set_depth_limit(r, d) pcre2_set_recursion_limit(r, d)
 #endif
 
-const unsigned VRE_has_jit = VRE_STUDY_JIT_COMPILE;
-
-#if PCRE_MAJOR < 8 || (PCRE_MAJOR == 8 && PCRE_MINOR < 20)
-#  define pcre_free_study pcre_free
-#endif
+#define VRE_PACKED_RE		(pcre2_code *)(-1)
 
 struct vre {
 	unsigned		magic;
 #define VRE_MAGIC		0xe83097dc
-	pcre			*re;
-	pcre_extra		*re_extra;
-	int			my_extra;
+	pcre2_code		*re;
+	pcre2_match_context	*re_ctx;
 };
 
 /*
- * We don't want to spread or even expose the majority of PCRE options
- * so we establish our own options and implement hard linkage to PCRE
- * here.
+ * We don't want to spread or even expose the majority of PCRE2 options
+ * and errors so we establish our own symbols and implement hard linkage
+ * to PCRE2 here.
  */
-const unsigned VRE_CASELESS = PCRE_CASELESS;
-const unsigned VRE_NOTEMPTY = PCRE_NOTEMPTY;
+const int VRE_ERROR_NOMATCH = PCRE2_ERROR_NOMATCH;
+
+const unsigned VRE_CASELESS = PCRE2_CASELESS;
 
 /*
  * Even though we only have one for each case so far, keep track of masks
- * to differentiate between compile and exec options and enfore the hard
+ * to differentiate between compile and match options and enfore the hard
  * VRE linkage.
  */
-#define VRE_MASK_COMPILE	PCRE_CASELESS
-#define VRE_MASK_EXEC		PCRE_NOTEMPTY
+#define VRE_MASK_COMPILE	PCRE2_CASELESS
+#define VRE_MASK_MATCH		0
 
 vre_t *
 VRE_compile(const char *pattern, unsigned options,
-    const char **errptr, int *erroffset)
+    int *errptr, int *erroffset, unsigned jit)
 {
+	PCRE2_SIZE erroff;
 	vre_t *v;
-	*errptr = NULL; *erroffset = 0;
+
+	AN(pattern);
+	AZ(options & (~VRE_MASK_COMPILE));
+	AN(errptr);
+	AN(erroffset);
+
+	*errptr = 0;
+	*erroffset = -1;
 
 	ALLOC_OBJ(v, VRE_MAGIC);
 	if (v == NULL) {
-		*errptr = "Out of memory for VRE";
+		*errptr = PCRE2_ERROR_NOMEMORY;
 		return (NULL);
 	}
-	AZ(options & (~VRE_MASK_COMPILE));
-	v->re = pcre_compile(pattern, options, errptr, erroffset, NULL);
+	v->re = pcre2_compile((PCRE2_SPTR8)pattern, PCRE2_ZERO_TERMINATED,
+	    options, errptr, &erroff, NULL);
+	*erroffset = erroff;
 	if (v->re == NULL) {
 		VRE_free(&v);
 		return (NULL);
 	}
-	v->re_extra = pcre_study(v->re, VRE_STUDY_JIT_COMPILE, errptr);
-	if (*errptr != NULL) {
+	v->re_ctx = pcre2_match_context_create(NULL);
+	if (v->re_ctx == NULL) {
+		*errptr = PCRE2_ERROR_NOMEMORY;
 		VRE_free(&v);
 		return (NULL);
 	}
-	if (v->re_extra == NULL) {
-		/* allocate our own */
-		v->re_extra = calloc(1, sizeof(pcre_extra));
-		v->my_extra = 1;
-		if (v->re_extra == NULL) {
-			*errptr = "Out of memory for pcre_extra";
-			VRE_free(&v);
-			return (NULL);
-		}
-	}
+#if USE_PCRE2_JIT
+	if (jit)
+		(void)pcre2_jit_compile(v->re, 0);
+#else
+	(void)jit;
+#endif
 	return (v);
 }
 
 int
-VRE_exec(const vre_t *code, const char *subject, int length,
-    int startoffset, int options, int *ovector, int ovecsize,
-    const volatile struct vre_limits *lim)
+VRE_error(struct vsb *vsb, int err)
 {
+	char buf[VRE_ERROR_LEN];
+	int i;
+
+	CHECK_OBJ_NOTNULL(vsb, VSB_MAGIC);
+	i = pcre2_get_error_message(err, (PCRE2_UCHAR *)buf, VRE_ERROR_LEN);
+	if (i == PCRE2_ERROR_BADDATA) {
+		VSB_printf(vsb, "unknown pcre2 error code (%d)", err);
+		return (-1);
+	}
+	VSB_cat(vsb, buf);
+	return (0);
+}
+
+pcre2_code *
+VRE_unpack(const vre_t *code)
+{
+
 	CHECK_OBJ_NOTNULL(code, VRE_MAGIC);
-	int ov[30];
-
-	if (ovector == NULL) {
-		ovector = ov;
-		ovecsize = sizeof(ov)/sizeof(ov[0]);
+	if (code->re == VRE_PACKED_RE) {
+		AZ(code->re_ctx);
+		return (TRUST_ME(code + 1));
 	}
+	return (code->re);
+}
 
-	if (lim != NULL) {
-		/* XXX: not reentrant */
-		code->re_extra->match_limit = lim->match;
-		code->re_extra->flags |= PCRE_EXTRA_MATCH_LIMIT;
-		code->re_extra->match_limit_recursion = lim->match_recursion;
-		code->re_extra->flags |= PCRE_EXTRA_MATCH_LIMIT_RECURSION;
+static void
+vre_limit(const vre_t *code, const volatile struct vre_limits *lim)
+{
+
+	CHECK_OBJ_NOTNULL(code, VRE_MAGIC);
+
+	if (lim == NULL)
+		return;
+
+	assert(code->re != VRE_PACKED_RE);
+
+	/* XXX: not reentrant */
+	AN(code->re_ctx);
+	AZ(pcre2_set_match_limit(code->re_ctx, lim->match));
+	AZ(pcre2_set_depth_limit(code->re_ctx, lim->depth));
+}
+
+vre_t *
+VRE_export(const vre_t *code, size_t *sz)
+{
+	pcre2_code *re;
+	vre_t *exp;
+
+	CHECK_OBJ_NOTNULL(code, VRE_MAGIC);
+	re = VRE_unpack(code);
+	AZ(pcre2_pattern_info(re, PCRE2_INFO_SIZE, sz));
+
+	exp = malloc(sizeof(*exp) + *sz);
+	if (exp == NULL)
+		return (NULL);
+
+	INIT_OBJ(exp, VRE_MAGIC);
+	exp->re = VRE_PACKED_RE;
+	memcpy(exp + 1, re, *sz);
+	*sz += sizeof(*exp);
+	return (exp);
+}
+
+static int
+vre_match(const vre_t *code, const char *subject, size_t length, size_t offset,
+    int options, pcre2_match_data **datap)
+{
+	pcre2_match_data *data;
+	pcre2_code *re;
+	int matches;
+
+	re = VRE_unpack(code);
+
+	if (datap != NULL && *datap != NULL) {
+		data = *datap;
+		*datap = NULL;
 	} else {
-		code->re_extra->flags &= ~PCRE_EXTRA_MATCH_LIMIT;
-		code->re_extra->flags &= ~PCRE_EXTRA_MATCH_LIMIT_RECURSION;
+		data = pcre2_match_data_create_from_pattern(re, NULL);
+		AN(data);
 	}
 
-	AZ(options & (~VRE_MASK_EXEC));
-	return (pcre_exec(code->re, code->re_extra, subject, length,
-	    startoffset, options, ovector, ovecsize));
+	matches =  pcre2_match(re, (PCRE2_SPTR)subject, length, offset,
+	    options, data, code->re_ctx);
+
+	if (datap != NULL && matches > VRE_ERROR_NOMATCH)
+		*datap = data;
+	else
+		pcre2_match_data_free(data);
+	return (matches);
+}
+
+int
+VRE_match(const vre_t *code, const char *subject, size_t length,
+    int options, const volatile struct vre_limits *lim)
+{
+
+	CHECK_OBJ_NOTNULL(code, VRE_MAGIC);
+	AN(subject);
+	AZ(options & (~VRE_MASK_MATCH));
+
+	if (length == 0)
+		length = PCRE2_ZERO_TERMINATED;
+	vre_limit(code, lim);
+	return (vre_match(code, subject, length, 0, options, NULL));
+}
+
+int
+VRE_sub(const vre_t *code, const char *subject, const char *replacement,
+    struct vsb *vsb, const volatile struct vre_limits *lim, int all)
+{
+	pcre2_match_data *data = NULL;
+	PCRE2_SIZE *ovector;
+	uint32_t nov;
+	int i, l;
+	const char *s;
+	unsigned x;
+	int offset = 0;
+
+	CHECK_OBJ_NOTNULL(code, VRE_MAGIC);
+	CHECK_OBJ_NOTNULL(vsb, VSB_MAGIC);
+	AN(subject);
+	AN(replacement);
+
+	vre_limit(code, lim);
+	i = vre_match(code, subject, PCRE2_ZERO_TERMINATED, offset, 0, &data);
+
+	if (i <= VRE_ERROR_NOMATCH)
+		return (i);
+
+	do {
+		AN(data);
+		ovector = pcre2_get_ovector_pointer(data);
+		nov = pcre2_get_ovector_count(data);
+		AN(ovector);
+
+		/* Copy prefix to match */
+		VSB_bcat(vsb, subject + offset, ovector[0] - offset);
+		for (s = replacement; *s != '\0'; s++ ) {
+			if (*s != '\\' || s[1] == '\0') {
+				VSB_putc(vsb, *s);
+				continue;
+			}
+			s++;
+			if (isdigit(*s)) {
+				x = *s - '0';
+				if (x >= nov)
+					continue;
+				l = ovector[2*x+1] - ovector[2*x];
+				VSB_bcat(vsb, subject + ovector[2*x], l);
+				continue;
+			}
+			VSB_putc(vsb, *s);
+		}
+		offset = ovector[1];
+		if (!all)
+			break;
+		i = vre_match(code, subject, PCRE2_ZERO_TERMINATED, offset,
+		    PCRE2_NOTEMPTY, &data);
+		if (i < VRE_ERROR_NOMATCH)
+			return (i);
+	} while (i != VRE_ERROR_NOMATCH);
+
+	if (data != NULL) {
+		assert(i > VRE_ERROR_NOMATCH);
+		AZ(all);
+		pcre2_match_data_free(data);
+	}
+
+	/* Copy suffix to match */
+	VSB_cat(vsb, subject + offset);
+	return (1);
 }
 
 void
@@ -150,14 +298,16 @@ VRE_free(vre_t **vv)
 
 	*vv = NULL;
 	CHECK_OBJ(v, VRE_MAGIC);
-	if (v->re_extra != NULL) {
-		if (v->my_extra)
-			free(v->re_extra);
-		else
-			pcre_free_study(v->re_extra);
+
+	if (v->re == VRE_PACKED_RE) {
+		v->re = NULL;
+		AZ(v->re_ctx);
 	}
+
+	if (v->re_ctx != NULL)
+		pcre2_match_context_free(v->re_ctx);
 	if (v->re != NULL)
-		pcre_free(v->re);
+		pcre2_code_free(v->re);
 	FREE_OBJ(v);
 }
 

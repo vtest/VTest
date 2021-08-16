@@ -298,10 +298,10 @@ static void v_matchproto_(cmd_f)
 cmd_haproxy_cli_expect(CMD_ARGS)
 {
 	struct haproxy_cli *hc;
+	struct vsb vsb[1];
 	vre_t *vre;
-	const char *error;
-	int erroroffset, i, ret;
-	char *cmp, *spec;
+	int error, erroroffset, i, ret;
+	char *cmp, *spec, errbuf[VRE_ERROR_LEN];
 
 	(void)vl;
 	CAST_OBJ_NOTNULL(hc, priv, HAPROXY_CLI_MAGIC);
@@ -318,12 +318,17 @@ cmd_haproxy_cli_expect(CMD_ARGS)
 
 	haproxy_cli_recv(hc);
 
-	vre = VRE_compile(spec, 0, &error, &erroroffset);
-	if (!vre)
+	vre = VRE_compile(spec, 0, &error, &erroroffset, 1);
+	if (vre == NULL) {
+		AN(VSB_init(vsb, errbuf, sizeof errbuf));
+		AZ(VRE_error(vsb, error));
+		AZ(VSB_finish(vsb));
+		VSB_fini(vsb);
 		vtc_fatal(hc->vl, "CLI regexp error: '%s' (@%d) (%s)",
-		    error, erroroffset, spec);
+		    errbuf, erroroffset, spec);
+	}
 
-	i = VRE_exec(vre, hc->rxbuf, strlen(hc->rxbuf), 0, 0, NULL, 0, 0);
+	i = VRE_match(vre, hc->rxbuf, 0, 0, NULL);
 
 	VRE_free(&vre);
 

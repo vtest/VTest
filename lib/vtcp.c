@@ -189,26 +189,23 @@ VTCP_filter_http(int sock)
 
 /*--------------------------------------------------------------------*/
 
+
+int
+VTCP_fastopen(int sock, int depth)
+{
 #ifdef HAVE_TCP_FASTOPEN
-
-int
-VTCP_fastopen(int sock, int depth)
-{
+#  ifndef SOL_TCP
+#    define SOL_TCP IPPROTO_TCP
+#  endif
 	return (setsockopt(sock, SOL_TCP, TCP_FASTOPEN, &depth, sizeof depth));
-}
-
 #else
-
-int
-VTCP_fastopen(int sock, int depth)
-{
 	errno = EOPNOTSUPP;
 	(void)sock;
 	(void)depth;
 	return (-1);
+#endif
 }
 
-#endif
 
 /*--------------------------------------------------------------------
  * Functions for controlling NONBLOCK mode.
@@ -352,8 +349,8 @@ VTCP_close(int *s)
 void
 VTCP_set_read_timeout(int s, vtim_dur seconds)
 {
-#ifdef SO_RCVTIMEO_WORKS
 	struct timeval timeout = VTIM_timeval(seconds);
+
 	/*
 	 * Solaris bug (present at least in snv_151 and older): If this fails
 	 * with EINVAL, the socket is half-closed (SS_CANTSENDMORE) and the
@@ -362,10 +359,6 @@ VTCP_set_read_timeout(int s, vtim_dur seconds)
 	 */
 	VTCP_Assert(setsockopt(s, SOL_SOCKET, SO_RCVTIMEO,
 	    &timeout, sizeof timeout));
-#else
-	(void)s;
-	(void)seconds;
-#endif
 }
 
 /*--------------------------------------------------------------------
@@ -629,7 +622,7 @@ VTCP_Check(ssize_t a)
 	if (errno == EINVAL)
 		return (1);
 #endif
-#if (defined(__SANITIZER) || __has_feature(address_sanitizer))
+#if defined(ENABLE_SANITIZER)
 	if (errno == EINTR)
 		return (1);
 #endif

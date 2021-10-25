@@ -33,6 +33,9 @@
 
 #include "config.h"
 
+#include <sys/types.h>
+
+#include <limits.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -353,6 +356,66 @@ VNUM_2bytes(const char *p, uintmax_t *r, uintmax_t rel)
 	return (NULL);
 }
 
+/**********************************************************************/
+
+static const uint8_t hex_table[] = {
+	0,   1,   2,   3,   4,   5,   6,   7,   8,   9,
+	127, 127, 127, 127, 127, 127, 127, 10,  11,  12,
+	13,  14,  15,  127, 127, 127, 127, 127, 127, 127,
+	127, 127, 127, 127, 127, 127, 127, 127, 127, 127,
+	127, 127, 127, 127, 127, 127, 127, 127, 127, 10,
+	11,  12,  13,  14,  15
+};
+
+static ssize_t
+vnum_uint(const char *b, const char *e, const char **p, unsigned base)
+{
+	ssize_t u;
+	unsigned n;
+
+	AN(b);
+	AN(p);
+	if (e == NULL)
+		e = strchr(b, '\0');
+
+	u = 0;
+	if (!vct_ishex(*b) || hex_table[*b - '0'] >= base) {
+		*p = b;
+		return (-1);
+	}
+
+	for (; b < e && vct_ishex(*b) && hex_table[*b - '0'] < base; b++) {
+		if (u > (SSIZE_MAX / base)) {
+			u = -2;
+			break;
+		}
+		u *= base;
+		n = hex_table[*b - '0'];
+		if (u > (SSIZE_MAX - n)) {
+			u = -2;
+			break;
+		}
+		u += n;
+	}
+
+	*p = b;
+	return (u);
+}
+
+ssize_t
+VNUM_uint(const char *b, const char *e, const char **p)
+{
+
+	return (vnum_uint(b, e, p, 10));
+}
+
+ssize_t
+VNUM_hex(const char *b, const char *e, const char **p)
+{
+
+	return (vnum_uint(b, e, p, 16));
+}
+
 #ifdef NUM_C_TEST
 /*
  * Compile with:
@@ -630,9 +693,10 @@ main(int argc, char *argv[])
 		++ec;
 	}
 	d1 = VNUM_duration(" 365.24219d ");
-	if (d1 != 31556908.8) {
+	d2 = 31556908.8;
+	if (fabs(d1 - d2) > VNUM_EPSILON) {
 		printf("%s: VNUM_Duration() wrong, %.3f delta = %e\n",
-		    *argv, d1, d1 - 31556908.8);
+		    *argv, d1, d1 - d2);
 		++ec;
 	}
 	/* TODO: test invalid strings */

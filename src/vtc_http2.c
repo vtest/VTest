@@ -330,11 +330,11 @@ write_frame(const struct stream *sp, const struct frame *f, const unsigned lock)
 
 	writeFrameHeader(hdr, f);
 
-	vtc_log(sp->vl, 3, "tx: stream: %d, type: %s (%d), "
-			"flags: 0x%02x, size: %d",
-			f->stid,
-			f->type < TYPE_MAX ? h2_types[f->type] : "?",
-			f->type, f->flags, f->size);
+	vtc_log(sp->vl, 3,
+	    "tx: stream: %d, type: %s (%d), flags: 0x%02x, size: %d",
+	    f->stid,
+	    f->type < TYPE_MAX ? h2_types[f->type] : "?",
+	    f->type, f->flags, f->size);
 
 	if (lock)
 		AZ(pthread_mutex_lock(&hp->mtx));
@@ -937,6 +937,7 @@ cmd_var_resolve(const struct stream *s, const char *spec, char *buf)
 
 	n = 0;
 	/* SECTION: stream.spec.zexpect.ping PING specific
+	 *
 	 * ping.data
 	 *	The 8-bytes string of the PING frame payload.
 	 * ping.ack (PING)
@@ -952,6 +953,7 @@ cmd_var_resolve(const struct stream *s, const char *spec, char *buf)
 		return (buf);
 	}
 	/* SECTION: stream.spec.zexpect.winup WINDOW_UPDATE specific
+	 *
 	 * winup.size
 	 *	The size of the upgrade given by the WINDOW_UPDATE frame.
 	 */
@@ -960,6 +962,7 @@ cmd_var_resolve(const struct stream *s, const char *spec, char *buf)
 		RETURN_BUFFED(f->md.winup_size);
 	}
 	/* SECTION: stream.spec.zexpect.prio PRIORITY specific
+	 *
 	 * prio.stream
 	 *	The stream ID announced.
 	 *
@@ -983,6 +986,7 @@ cmd_var_resolve(const struct stream *s, const char *spec, char *buf)
 		RETURN_BUFFED(f->md.prio.weight);
 	}
 	/* SECTION: stream.spec.zexpect.rst RESET_STREAM specific
+	 *
 	 * rst.err
 	 *	The error code (as integer) of the RESET_STREAM frame.
 	 */
@@ -1037,6 +1041,7 @@ cmd_var_resolve(const struct stream *s, const char *spec, char *buf)
 		if (!strcmp(spec, "hdrsize"))    { RETURN_SETTINGS(6); }
 	}
 	/* SECTION: stream.spec.zexpect.push PUSH_PROMISE specific
+	 *
 	 * push.id
 	 *	The id of the promised stream.
 	 */
@@ -1045,6 +1050,7 @@ cmd_var_resolve(const struct stream *s, const char *spec, char *buf)
 		RETURN_BUFFED(f->md.promised);
 	}
 	/* SECTION: stream.spec.zexpect.goaway GOAWAY specific
+	 *
 	 * goaway.err
 	 *	The error code (as integer) of the GOAWAY frame.
 	 *
@@ -1066,6 +1072,7 @@ cmd_var_resolve(const struct stream *s, const char *spec, char *buf)
 			return (f->md.goaway.debug);
 	}
 	/* SECTION: stream.spec.zexpect.zframe Generic frame
+	 *
 	 * frame.data
 	 *	Payload of the last frame
 	 *
@@ -1101,6 +1108,7 @@ cmd_var_resolve(const struct stream *s, const char *spec, char *buf)
 		}
 	}
 	/* SECTION: stream.spec.zexpect.zstream Stream
+	 *
 	 * stream.window
 	 *	The current window size of the stream, or, if on stream 0,
 	 *	of the connection.
@@ -1131,6 +1139,7 @@ cmd_var_resolve(const struct stream *s, const char *spec, char *buf)
 			return (NULL);
 	}
 	/* SECTION: stream.spec.zexpect.ztable Index tables
+	 *
 	 * tbl.dec.size / tbl.enc.size
 	 *	Size (bytes) of the decoding/encoding table.
 	 *
@@ -1633,8 +1642,8 @@ cmd_tx11obj(CMD_ARGS)
 			exclusive_stream_dependency(s);
 	}
 	if (pad) {
-		if (strlen(pad) >= 128)
-			vtc_fatal(vl, "Padding is limited to 128 bytes");
+		if (strlen(pad) > 255)
+			vtc_fatal(vl, "Padding is limited to 255 bytes");
 		f.flags |= PADDED;
 		assert(f.size + strlen(pad) < BUF_SIZE);
 		memmove(buf + 1, buf, f.size);
@@ -1726,8 +1735,8 @@ cmd_txdata(CMD_ARGS)
 
 	if (pad) {
 		f.flags |= PADDED;
-		if (strlen(pad) >= 128)
-			vtc_fatal(vl, "Padding is limited to 128 bytes");
+		if (strlen(pad) > 255)
+			vtc_fatal(vl, "Padding is limited to 255 bytes");
 		data = malloc( 1 + strlen(body) + strlen(pad));
 		AN(data);
 		*((uint8_t *)data) = strlen(pad);
@@ -2291,7 +2300,7 @@ static void
 cmd_rxmsg(CMD_ARGS)
 {
 	struct stream *s;
-	struct frame *f;
+	struct frame *f = NULL;
 	int end_stream;
 	int rcv = 0;
 
@@ -2302,9 +2311,12 @@ cmd_rxmsg(CMD_ARGS)
 	else
 		ONLY_H2_CLIENT(s->hp, av);
 
-	f = rxstuff(s);
-	if (!f)
-		return;
+	do {
+		replace_frame(&f, rxstuff(s));
+		CHECK_OBJ_ORNULL(f, FRAME_MAGIC);
+		if (f == NULL)
+			return;
+	} while (f->type == TYPE_WINDOW_UPDATE);
 
 	rcv++;
 	CHKFRAME(f->type, TYPE_HEADERS, rcv, *av);
@@ -2313,6 +2325,7 @@ cmd_rxmsg(CMD_ARGS)
 
 	while (!(f->flags & END_HEADERS)) {
 		replace_frame(&f, rxstuff(s));
+		CHECK_OBJ_ORNULL(f, FRAME_MAGIC);
 		if (f == NULL)
 			return;
 		rcv++;
@@ -2321,6 +2334,7 @@ cmd_rxmsg(CMD_ARGS)
 
 	while (!end_stream) {
 		replace_frame(&f, rxstuff(s));
+		CHECK_OBJ_ORNULL(f, FRAME_MAGIC);
 		if (f == NULL)
 			break;
 		rcv++;

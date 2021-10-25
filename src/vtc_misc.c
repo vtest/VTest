@@ -246,34 +246,6 @@ cmd_shell(CMD_ARGS)
 	cmd_shell_engine(vl, ok, av[n], expect, re);
 }
 
-/* SECTION: err_shell err_shell
- *
- * NOTICE: err_shell is deprecated, use `shell -err -expect` instead.
- *
- * This is very similar to the the ``shell`` command, except it takes a first
- * string as argument before the command::
- *
- *         err_shell "foo" "echo foo"
- *
- * err_shell expect the shell command to fail AND stdout to match the string,
- * failing the test case otherwise.
- */
-
-void v_matchproto_(cmd_f)
-cmd_err_shell(CMD_ARGS)
-{
-	(void)priv;
-
-	if (av == NULL)
-		return;
-	AN(av[1]);
-	AN(av[2]);
-	AZ(av[3]);
-	vtc_log(vl, 1,
-	    "NOTICE: err_shell is deprecated, use 'shell -err -expect'");
-	cmd_shell_engine(vl, -1, av[2], av[1], NULL);
-}
-
 /* SECTION: setenv setenv
  *
  * Set or change an environment variable::
@@ -321,7 +293,6 @@ cmd_setenv(CMD_ARGS)
  *
  * Sleep for the number of seconds specified in the argument. The number
  * can include a fractional part, e.g. 1.5.
- *
  */
 void
 cmd_delay(CMD_ARGS)
@@ -411,8 +382,6 @@ addr_no_randomize_works(void)
  * the test otherwise; or change the interpretation of the test, as
  * documented below. feature takes any number of arguments from this list:
  *
- * SO_RCVTIMEO_WORKS
- *        The SO_RCVTIMEO socket option is working
  * 64bit
  *        The environment is 64 bits
  * ipv4
@@ -438,33 +407,75 @@ addr_no_randomize_works(void)
  *        recognized as a macro.
  * persistent_storage
  *        Varnish was built with the deprecated persistent storage.
+ * coverage
+ *        Varnish was built with code coverage enabled.
+ * asan
+ *        Varnish was built with the address sanitizer.
+ * msan
+ *        Varnish was built with the memory sanitizer.
+ * tsan
+ *        Varnish was built with the thread sanitizer.
+ * ubsan
+ *        Varnish was built with the undefined behavior sanitizer.
  * sanitizer
  *        Varnish was built with a sanitizer.
+ * workspace_emulator
+ *        Varnish was built with its workspace emulator.
  *
  * A feature name can be prefixed with an exclamation mark (!) to skip a
- * test if a feature is present.
+ * test if the feature is present.
  *
  * Be careful with ignore_unknown_macro, because it may cause a test with a
  * misspelled macro to fail silently. You should only need it if you must
  * run a test with strings of the form "${...}".
  */
 
-#if WITH_PERSISTENT_STORAGE
-static const unsigned with_persistent_storage = 1;
+#if ENABLE_COVERAGE
+static const unsigned coverage = 1;
 #else
-static const unsigned with_persistent_storage = 0;
+static const unsigned coverage = 0;
 #endif
 
-#if __SANITIZER
+#if ENABLE_ASAN
+static const unsigned asan = 1;
+#else
+static const unsigned asan = 0;
+#endif
+
+#if ENABLE_MSAN
+static const unsigned msan = 1;
+#else
+static const unsigned msan = 0;
+#endif
+
+#if ENABLE_TSAN
+static const unsigned tsan = 1;
+#else
+static const unsigned tsan = 0;
+#endif
+
+#if ENABLE_UBSAN
+static const unsigned ubsan = 1;
+#else
+static const unsigned ubsan = 0;
+#endif
+
+#if ENABLE_SANITIZER
 static const unsigned sanitizer = 1;
 #else
 static const unsigned sanitizer = 0;
 #endif
 
-#ifdef SO_RCVTIMEO_WORKS
-static const unsigned so_rcvtimeo_works = 1;
+#if ENABLE_WORKSPACE_EMULATOR
+static const unsigned workspace_emulator = 1;
 #else
-static const unsigned so_rcvtimeo_works = 0;
+static const unsigned workspace_emulator = 0;
+#endif
+
+#if WITH_PERSISTENT_STORAGE
+static const unsigned with_persistent_storage = 1;
+#else
+static const unsigned with_persistent_storage = 0;
 #endif
 
 void v_matchproto_(cmd_f)
@@ -513,8 +524,13 @@ cmd_feature(CMD_ARGS)
 		FEATURE("user_vcache", getpwnam("vcache") != NULL);
 		FEATURE("group_varnish", getgrnam("varnish") != NULL);
 		FEATURE("persistent_storage", with_persistent_storage);
+		FEATURE("coverage", coverage);
+		FEATURE("asan", asan);
+		FEATURE("msan", msan);
+		FEATURE("tsan", tsan);
+		FEATURE("ubsan", ubsan);
 		FEATURE("sanitizer", sanitizer);
-		FEATURE("SO_RCVTIMEO_WORKS", so_rcvtimeo_works);
+		FEATURE("workspace_emulator", workspace_emulator);
 
 		if (!strcmp(feat, "cmd")) {
 			good = 1;

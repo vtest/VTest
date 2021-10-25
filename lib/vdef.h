@@ -112,6 +112,19 @@
 #  define v_dont_optimize
 #endif
 
+#ifdef HAVE___GCOV_FLUSH
+#  define v_gcov_flush() __gcov_flush()
+int __gcov_flush(void);
+#elif defined HAVE___GCOV_DUMP
+#  define v_gcov_flush() __gcov_dump()
+void __gcov_dump(void);
+#elif defined HAVE___LLVM_GCOV_FLUSH
+#  define v_gcov_flush() __llvm_gcov_flush()
+int __llvm_gcov_flush(void);
+#else
+#  define v_gcov_flush() do { } while (0)
+#endif
+
 /*********************************************************************
  * Fundamental numerical limits
   * These limits track RFC8941
@@ -184,3 +197,15 @@
 typedef double vtim_mono;
 typedef double vtim_real;
 typedef double vtim_dur;
+
+/**********************************************************************
+ * txt (vas.h needed for the macros)
+ */
+
+typedef struct {
+	const char		*b;
+	const char		*e;
+} txt;
+
+#define Tcheck(t)	do { (void)pdiff((t).b, (t).e); } while (0)
+#define Tlen(t)		(pdiff((t).b, (t).e))

@@ -81,7 +81,7 @@
 
 struct vbh {
 	unsigned		magic;
-#define VBH_MAGIC		0xf581581aU	/* from /dev/random */
+#define VBH_MAGIC		0xf581581a	/* from /dev/random */
 	void			*priv;
 	vbh_cmp_t		*cmp;
 	vbh_update_t		*update;
@@ -613,7 +613,7 @@ main(void)
 		for (u = 0; u < M; u++) {
 			v = VRND_RandomTestable() % N;
 			if (ff[v] != NULL) {
-				CHECK_OBJ_NOTNULL(ff[v], FOO_MAGIC);
+				CHECK_OBJ(ff[v], FOO_MAGIC);
 				AN(ff[v]->idx);
 				if (ff[v]->key & 1) {
 					VBH_delete(bh, ff[v]->idx);
@@ -639,6 +639,7 @@ main(void)
 		fprintf(stderr, "%d updates OK\n", M);
 	}
 	while ((fp = VBH_root(bh)) != NULL) {
+		CHECK_OBJ(fp, FOO_MAGIC);
 		VBH_delete(bh, fp->idx);
 		FREE_OBJ(fp);
 	}

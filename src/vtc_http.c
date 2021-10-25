@@ -1201,7 +1201,7 @@ cmd_http_txreq(CMD_ARGS)
 		} else if (!strcmp(*av, "-method") ||
 		    !strcmp(*av, "-req")) {
 			req = av[1];
-			hp->head_method = !strcasecmp(av[1], "HEAD") ;
+			hp->head_method = !strcmp(av[1], "HEAD") ;
 			av++;
 		} else if (!hp->sfd && !strcmp(*av, "-up")) {
 			up = av[1];
@@ -1216,7 +1216,7 @@ cmd_http_txreq(CMD_ARGS)
 				"Upgrade: h2c%s"
 				"HTTP2-Settings: %s%s", nl, nl, up, nl);
 
-	nohost = strcasecmp(proto, "HTTP/1.1") != 0;
+	nohost = strcmp(proto, "HTTP/1.1") != 0;
 	av = http_tx_parse_args(av, vl, hp, NULL, nohost);
 	if (*av != NULL)
 		vtc_fatal(hp->vl, "Unknown http txreq spec: %s\n", *av);
@@ -1777,7 +1777,9 @@ const struct cmds http_cmds[] = {
 static void
 http_process_cleanup(void *arg)
 {
-	struct http *hp = arg;
+	struct http *hp;
+
+	CAST_OBJ_NOTNULL(hp, arg, HTTP_MAGIC);
 
 	if (hp->h2)
 		stop_h2(hp);
@@ -1803,7 +1805,6 @@ http_process(struct vtclog *vl, struct vtc_sess *vsp, const char *spec,
 	hp->sess = vsp;
 	hp->sess->fd = sock;
 	hp->timeout = vtc_maxdur * 1000 / 2;
-
 
 	if (rcvbuf) {
 		// XXX setsockopt() too late on SunOS
@@ -1851,6 +1852,12 @@ http_process(struct vtclog *vl, struct vtc_sess *vsp, const char *spec,
 		strcpy(hp->rem_port, "0");
 		hp->rem_path = strdup(addr);
 	}
+	/* XXX: After an upgrade to HTTP/2 the cleanup of a server that is
+	 * not -wait'ed before the test resets is subject to a race where the
+	 * cleanup does not happen, so ASAN reports leaks despite the push
+	 * of a cleanup handler. To easily reproduce, remove the server wait
+	 * from a02022.vtc and run with ASAN enabled.
+	 */
 	pthread_cleanup_push(http_process_cleanup, hp);
 	parse_string(vl, hp, spec);
 	retval = hp->sess->fd;

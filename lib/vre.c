@@ -43,7 +43,7 @@
 #include "vre.h"
 #include "vre_pcre2.h"
 
-#ifndef pcre2_set_depth_limit
+#if !defined(pcre2_set_depth_limit)
 #  define pcre2_set_depth_limit(r, d) pcre2_set_recursion_limit(r, d)
 #endif
 
@@ -108,7 +108,7 @@ VRE_compile(const char *pattern, unsigned options,
 	}
 #if USE_PCRE2_JIT
 	if (jit)
-		(void)pcre2_jit_compile(v->re, 0);
+		(void)pcre2_jit_compile(v->re, PCRE2_JIT_COMPLETE);
 #else
 	(void)jit;
 #endif
@@ -135,6 +135,10 @@ pcre2_code *
 VRE_unpack(const vre_t *code)
 {
 
+	/* XXX: The ban code ensures that regex "lumps" are pointer-aligned,
+	 * but coming for example from a VMOD there is no guarantee. Should
+	 * we formally require that code is properly aligned?
+	 */
 	CHECK_OBJ_NOTNULL(code, VRE_MAGIC);
 	if (code->re == VRE_PACKED_RE) {
 		AZ(code->re_ctx);
@@ -182,11 +186,14 @@ VRE_export(const vre_t *code, size_t *sz)
 }
 
 static int
-vre_match(const vre_t *code, const char *subject, size_t length, size_t offset,
-    int options, pcre2_match_data **datap)
+vre_capture(const vre_t *code, const char *subject, size_t length,
+    size_t offset, int options, txt *groups, size_t *count,
+    pcre2_match_data **datap)
 {
 	pcre2_match_data *data;
 	pcre2_code *re;
+	PCRE2_SIZE *ovector, b, e;
+	size_t nov, g;
 	int matches;
 
 	re = VRE_unpack(code);
@@ -199,8 +206,34 @@ vre_match(const vre_t *code, const char *subject, size_t length, size_t offset,
 		AN(data);
 	}
 
-	matches =  pcre2_match(re, (PCRE2_SPTR)subject, length, offset,
+	ovector = pcre2_get_ovector_pointer(data);
+	nov = 2L * pcre2_get_ovector_count(data);
+	for (g = 0; g < nov; g++)
+		ovector[g] = PCRE2_UNSET;
+
+	matches = pcre2_match(re, (PCRE2_SPTR)subject, length, offset,
 	    options, data, code->re_ctx);
+
+	if (groups != NULL) {
+		AN(count);
+		AN(*count);
+		ovector = pcre2_get_ovector_pointer(data);
+		nov = pcre2_get_ovector_count(data);
+		if (nov > *count)
+			nov = *count;
+		for (g = 0; g < nov; g++) {
+			b = ovector[2 * g];
+			e = ovector[2 * g + 1];
+			if (b == PCRE2_UNSET) {
+				groups->b = groups->e = "";
+			} else {
+				groups->b = subject + b;
+				groups->e = subject + e;
+			}
+			groups++;
+		}
+		*count = nov;
+	}
 
 	if (datap != NULL && matches > VRE_ERROR_NOMATCH)
 		*datap = data;
@@ -221,7 +254,31 @@ VRE_match(const vre_t *code, const char *subject, size_t length,
 	if (length == 0)
 		length = PCRE2_ZERO_TERMINATED;
 	vre_limit(code, lim);
-	return (vre_match(code, subject, length, 0, options, NULL));
+	return (vre_capture(code, subject, length, 0, options,
+	    NULL, NULL, NULL));
+}
+
+int
+VRE_capture(const vre_t *code, const char *subject, size_t length, int options,
+    txt *groups, size_t count, const volatile struct vre_limits *lim)
+{
+	int i;
+
+	CHECK_OBJ_NOTNULL(code, VRE_MAGIC);
+	AN(subject);
+	AZ(options & (~VRE_MASK_MATCH));
+	AN(groups);
+	AN(count);
+
+	if (length == 0)
+		length = PCRE2_ZERO_TERMINATED;
+	vre_limit(code, lim);
+	i = vre_capture(code, subject, length, 0, options,
+	    groups, &count, NULL);
+
+	if (i <= 0)
+		return (i);
+	return (count);
 }
 
 int
@@ -229,12 +286,11 @@ VRE_sub(const vre_t *code, const char *subject, const char *replacement,
     struct vsb *vsb, const volatile struct vre_limits *lim, int all)
 {
 	pcre2_match_data *data = NULL;
-	PCRE2_SIZE *ovector;
-	uint32_t nov;
-	int i, l;
+	txt groups[10];
+	size_t count;
+	int i, offset = 0;
 	const char *s;
 	unsigned x;
-	int offset = 0;
 
 	CHECK_OBJ_NOTNULL(code, VRE_MAGIC);
 	CHECK_OBJ_NOTNULL(vsb, VSB_MAGIC);
@@ -242,19 +298,22 @@ VRE_sub(const vre_t *code, const char *subject, const char *replacement,
 	AN(replacement);
 
 	vre_limit(code, lim);
-	i = vre_match(code, subject, PCRE2_ZERO_TERMINATED, offset, 0, &data);
+	count = 10;
+	i = vre_capture(code, subject, PCRE2_ZERO_TERMINATED, offset, 0,
+	    groups, &count, &data);
 
-	if (i <= VRE_ERROR_NOMATCH)
+	if (i <= VRE_ERROR_NOMATCH) {
+		AZ(data);
 		return (i);
+	}
 
 	do {
-		AN(data);
-		ovector = pcre2_get_ovector_pointer(data);
-		nov = pcre2_get_ovector_count(data);
-		AN(ovector);
+		AN(data); /* check reuse across successful captures */
+		AN(count);
 
 		/* Copy prefix to match */
-		VSB_bcat(vsb, subject + offset, ovector[0] - offset);
+		s = subject + offset;
+		VSB_bcat(vsb, s, pdiff(s, groups[0].b));
 		for (s = replacement; *s != '\0'; s++ ) {
 			if (*s != '\\' || s[1] == '\0') {
 				VSB_putc(vsb, *s);
@@ -263,21 +322,24 @@ VRE_sub(const vre_t *code, const char *subject, const char *replacement,
 			s++;
 			if (isdigit(*s)) {
 				x = *s - '0';
-				if (x >= nov)
+				if (x >= count)
 					continue;
-				l = ovector[2*x+1] - ovector[2*x];
-				VSB_bcat(vsb, subject + ovector[2*x], l);
+				VSB_bcat(vsb, groups[x].b, Tlen(groups[x]));
 				continue;
 			}
 			VSB_putc(vsb, *s);
 		}
-		offset = ovector[1];
+		offset = pdiff(subject, groups[0].e);
 		if (!all)
 			break;
-		i = vre_match(code, subject, PCRE2_ZERO_TERMINATED, offset,
-		    PCRE2_NOTEMPTY, &data);
-		if (i < VRE_ERROR_NOMATCH)
+		count = 10;
+		i = vre_capture(code, subject, PCRE2_ZERO_TERMINATED, offset,
+		    PCRE2_NOTEMPTY, groups, &count, &data);
+
+		if (i < VRE_ERROR_NOMATCH) {
+			AZ(data);
 			return (i);
+		}
 	} while (i != VRE_ERROR_NOMATCH);
 
 	if (data != NULL) {
@@ -294,10 +356,9 @@ VRE_sub(const vre_t *code, const char *subject, const char *replacement,
 void
 VRE_free(vre_t **vv)
 {
-	vre_t *v = *vv;
+	vre_t *v;
 
-	*vv = NULL;
-	CHECK_OBJ(v, VRE_MAGIC);
+	TAKE_OBJ_NOTNULL(v, vv, VRE_MAGIC);
 
 	if (v->re == VRE_PACKED_RE) {
 		v->re = NULL;

@@ -256,9 +256,10 @@ term_resize(struct process *pp, int lin, int col)
 }
 
 static int
-term_match_textline(const struct process *pp, int *x, int y, const char *pat)
+term_find_textline(const struct process *pp, int *x, int y, const char *pat)
 {
 	const char *t;
+	int l;
 
 	if (*x == 0) {
 		t = strstr(pp->vram[y], pat);
@@ -268,26 +269,28 @@ term_match_textline(const struct process *pp, int *x, int y, const char *pat)
 		}
 	} else if (*x <= pp->ncol) {
 		t = pp->vram[y] + *x - 1;
-		if (!memcmp(t, pat, strlen(pat)))
+		l = strlen(pat);
+		assert((*x - 1) + (l - 1) < pp->ncol);
+		if (!memcmp(t, pat, l))
 			return (1);
 	}
 	return (0);
 }
 
 static int
-term_match_text(const struct process *pp, int *x, int *y, const char *pat)
+term_find_text(const struct process *pp, int *x, int *y, const char *pat)
 {
 	int yy;
 
 	if (*y == 0) {
 		for (yy = 0; yy < pp->nlin; yy++) {
-			if (term_match_textline(pp, x, yy, pat)) {
+			if (term_find_textline(pp, x, yy, pat)) {
 				*y = yy + 1;
 				return (1);
 			}
 		}
 	} else if (*y <= pp->nlin) {
-		if (term_match_textline(pp, x, *y - 1, pat))
+		if (term_find_textline(pp, x, *y - 1, pat))
 			return (1);
 	}
 	return (0);
@@ -309,8 +312,10 @@ term_expect_text(struct process *pp,
 	if (x < 0 || x > pp->ncol)
 		vtc_fatal(pp->vl, "XXX %d ncol %d", x, pp->ncol);
 	l = strlen(pat);
+	if (x + l - 1 > pp->ncol)
+		vtc_fatal(pp->vl, "XXX %d ncol %d", x + l - 1, pp->ncol);
 	AZ(pthread_mutex_lock(&pp->mtx));
-	while (!term_match_text(pp, &x, &y, pat)) {
+	while (!term_find_text(pp, &x, &y, pat)) {
 		if (x != 0 && y != 0) {
 			t = pp->vram[y - 1] + x - 1;
 			vtc_log(pp->vl, 4,
@@ -904,6 +909,9 @@ process_close(struct process *p)
  *
  * \-stop
  *	Shorthand for -kill TERM.
+ *
+ * \-winsz LIN COL
+ *	Change the terminal window size to LIN lines and COL columns.
  *
  * \-write STRING
  *	Write a string to the process' stdin.

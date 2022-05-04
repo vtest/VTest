@@ -45,6 +45,7 @@
  *                         expect <skip> <vxid> <tag> <regex>
  *                         fail add <vxid> <tag> <regex>
  *                         fail clear
+ *                         abort
  *                         ...
  *                 } [-start|-wait]
  *
@@ -139,6 +140,11 @@
  *      fail clear
  *
  * .. XXX can we come up with a better solution which is still safe?
+ *
+ * abort specification:
+ *
+ * abort(3) varnishtest, intended to help debugging of the VSL client library
+ * itself.
  */
 
 #include "config.h"
@@ -162,6 +168,7 @@
 #define LE_SEEN  (-4)
 #define LE_FAIL  (-5)
 #define LE_CLEAR (-6)	// clear fail list
+#define LE_ABORT (-7)
 
 struct logexp_test {
 	unsigned			magic;
@@ -213,10 +220,12 @@ static VTAILQ_HEAD(, logexp)		logexps =
 
 static cmd_f cmd_logexp_expect;
 static cmd_f cmd_logexp_fail;
+static cmd_f cmd_logexp_abort;
 
 static const struct cmds logexp_cmds[] = {
 	{ "expect",		cmd_logexp_expect },
 	{ "fail",		cmd_logexp_fail },
+	{ "abort",		cmd_logexp_abort },
 	{ NULL,			NULL },
 };
 
@@ -345,17 +354,20 @@ logexp_next(struct logexp *le)
 		logexp_next(le);
 		return;
 	case LE_CLEAR:
-		vtc_log(le->vl, 3, "condition| fail clear");
+		vtc_log(le->vl, 3, "cond | fail clear");
 		VTAILQ_INIT(&le->fail);
 		logexp_next(le);
 		return;
 	case LE_FAIL:
-		vtc_log(le->vl, 3, "condition| %s", VSB_data(le->test->str));
+		vtc_log(le->vl, 3, "cond | %s", VSB_data(le->test->str));
 		VTAILQ_INSERT_TAIL(&le->fail, le->test, faillist);
 		logexp_next(le);
 		return;
+	case LE_ABORT:
+		abort();
+		NEEDLESS(return);
 	default:
-		vtc_log(le->vl, 3, "expecting| %s", VSB_data(le->test->str));
+		vtc_log(le->vl, 3, "test | %s", VSB_data(le->test->str));
 	}
 }
 
@@ -370,7 +382,7 @@ logexp_match(const struct logexp *le, struct logexp_test *test,
     const char *data, int vxid, int tag, int type, int len)
 {
 	const char *legend;
-	int ok = 1, skip = 0, alt, fail;
+	int ok = 1, skip = 0, alt, fail, vxid_ok = 0;
 
 	AN(le);
 	AN(test);
@@ -380,9 +392,11 @@ logexp_match(const struct logexp *le, struct logexp_test *test,
 	if (test->vxid == LE_LAST) {
 		if (le->vxid_last != vxid)
 			ok = 0;
+		vxid_ok = ok;
 	} else if (test->vxid >= 0) {
 		if (test->vxid != vxid)
 			ok = 0;
+		vxid_ok = ok;
 	}
 	if (test->tag == LE_LAST) {
 		if (le->tag_last != tag)
@@ -404,13 +418,20 @@ logexp_match(const struct logexp *le, struct logexp_test *test,
 		    test->skip_max > le->skip_cnt))
 		skip = 1;
 
+	if (skip && vxid_ok && tag == SLT_End)
+		fail = 1;
+
 	if (fail) {
-		if (ok)
+		if (ok) {
 			legend = "fail";
-		else if (le->m_arg)
+		} else if (skip) {
+			legend = "end";
+			skip = 0;
+		} else if (le->m_arg) {
 			legend = "fmiss";
-		else
+		} else {
 			legend = NULL;
+		}
 	}
 	else if (ok)
 		legend = "match";
@@ -435,7 +456,7 @@ logexp_match(const struct logexp *le, struct logexp_test *test,
 		test = logexp_alt(test);
 		if (test == NULL)
 			return (LEM_FAIL);
-		vtc_log(le->vl, 3, "alt      | %s", VSB_data(test->str));
+		vtc_log(le->vl, 3, "alt  | %s", VSB_data(test->str));
 		return (logexp_match(le, test, data, vxid, tag, type, len));
 	}
 	if (skip)
@@ -542,24 +563,24 @@ logexp_thread(void *priv)
 	AZ(le->test);
 	vtc_log(le->vl, 4, "begin|");
 	if (le->query != NULL)
-		vtc_log(le->vl, 4, "qry| %s", le->query);
+		vtc_log(le->vl, 4, "qry  | %s", le->query);
 	logexp_next(le);
 	while (!logexp_done(le) && !vtc_stop && !vtc_error) {
 		i = VSLQ_Dispatch(le->vslq, logexp_dispatch, le);
 		if (i == 2 && le->err_arg) {
-			vtc_log(le->vl, 4, "end| failed as expected");
+			vtc_log(le->vl, 4, "done | failed as expected");
 			return (NULL);
 		}
 		if (i == 2)
-			vtc_fatal(le->vl, "bad| expectation failed");
+			vtc_fatal(le->vl, "bad  | expectation failed");
 		else if (i < 0)
-			vtc_fatal(le->vl, "bad| dispatch failed (%d)", i);
+			vtc_fatal(le->vl, "bad  | dispatch failed (%d)", i);
 		else if (i == 0 && ! logexp_done(le))
 			VTIM_sleep(0.01);
 	}
 	if (!logexp_done(le))
-		vtc_fatal(le->vl, "bad| outstanding expectations");
-	vtc_log(le->vl, 4, "end|");
+		vtc_fatal(le->vl, "bad  | outstanding expectations");
+	vtc_log(le->vl, 4, "done |");
 
 	return (NULL);
 }
@@ -734,6 +755,18 @@ cmd_logexp_fail(CMD_ARGS)
 		vtc_fatal(vl, "Syntax error");
 
 	cmd_logexp_common(le, vl, LE_FAIL, av);
+}
+
+/* aid vsl debugging */
+static void
+cmd_logexp_abort(CMD_ARGS)
+{
+
+	struct logexp *le;
+
+	CAST_OBJ_NOTNULL(le, priv, LOGEXP_MAGIC);
+
+	cmd_logexp_common(le, vl, LE_ABORT, av);
 }
 
 static void

@@ -165,6 +165,54 @@ int __llvm_gcov_flush(void);
 #define RUP2(x, y)  (((x)+((y)-1))&(~((uintptr_t)(y)-1UL))) /* PWR2(y) true */
 
 /**********************************************************************
+ * Find the minimum or maximum values.
+ * Only evaluate the expression once and perform type checking.
+ */
+
+/* ref: https://stackoverflow.com/a/17624752 */
+
+#define VINDIRECT(a, b, c)	a ## b ## c
+#define VCOMBINE(a, b, c)	VINDIRECT(a, b, c)
+
+#if defined(__COUNTER__)
+#	define VUNIQ_NAME(base)	VCOMBINE(base, __LINE__, __COUNTER__)
+#else
+#	define VUNIQ_NAME(base)	VCOMBINE(base, __LINE__, 0)
+#endif
+
+#ifdef _lint
+#define typeof(x) __typeof__(x)
+#endif
+
+/* ref: https://gcc.gnu.org/onlinedocs/gcc/Typeof.html */
+
+#define _vtake(op, ta, tb, a, b, _va, _vb)				\
+	({								\
+	ta _va = (a);							\
+	tb _vb = (b);							\
+	(void)(&_va == &_vb);						\
+	_va op _vb ? _va : _vb;						\
+})
+
+#define opmin <
+#define opmax >
+#define vtake(n, ta, tb, a, b)	_vtake(op ## n, ta, tb, a, b,		\
+    VUNIQ_NAME(_v ## n ## A), VUNIQ_NAME(_v ## n ## B))
+
+#define vmin(a, b)		vtake(min, typeof(a), typeof(b), a, b)
+#define vmax(a, b)		vtake(max, typeof(a), typeof(b), a, b)
+
+#define vmin_t(type, a, b)	vtake(min, type, type, a, b)
+#define vmax_t(type, a, b)	vtake(max, type, type, a, b)
+
+/**********************************************************************
+ * Clamp the value between two limits.
+ */
+
+#define vlimit(a, l, u)		vmax((l), vmin((a), (u)))
+#define vlimit_t(type, a, l, u)	vmax_t(type, (l), vmin_t(type, (a), (u)))
+
+/**********************************************************************
  * FlexeLint and compiler shutuppery
  */
 

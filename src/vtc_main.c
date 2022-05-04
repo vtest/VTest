@@ -31,6 +31,7 @@
 #include "config.h"
 
 #include <sys/mman.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 
@@ -41,8 +42,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/socket.h>
-#include <sys/stat.h>
 
 #include "vtc.h"
 
@@ -527,7 +526,7 @@ i_mode(void)
 			    "could not find 'abs_top_builddir' in Makefile\n");
 			exit(2);
 		}
-		topbuild =  strchr(p + 1, '\n');
+		topbuild = strchr(p + 1, '\n');
 		if (topbuild == NULL) {
 			fprintf(stderr,
 			    "No NL after 'abs_top_builddir' in Makefile\n");

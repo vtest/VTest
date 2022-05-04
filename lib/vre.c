@@ -65,14 +65,6 @@ const int VRE_ERROR_NOMATCH = PCRE2_ERROR_NOMATCH;
 
 const unsigned VRE_CASELESS = PCRE2_CASELESS;
 
-/*
- * Even though we only have one for each case so far, keep track of masks
- * to differentiate between compile and match options and enfore the hard
- * VRE linkage.
- */
-#define VRE_MASK_COMPILE	PCRE2_CASELESS
-#define VRE_MASK_MATCH		0
-
 vre_t *
 VRE_compile(const char *pattern, unsigned options,
     int *errptr, int *erroffset, unsigned jit)
@@ -81,7 +73,6 @@ VRE_compile(const char *pattern, unsigned options,
 	vre_t *v;
 
 	AN(pattern);
-	AZ(options & (~VRE_MASK_COMPILE));
 	AN(errptr);
 	AN(erroffset);
 
@@ -218,9 +209,7 @@ vre_capture(const vre_t *code, const char *subject, size_t length,
 		AN(count);
 		AN(*count);
 		ovector = pcre2_get_ovector_pointer(data);
-		nov = pcre2_get_ovector_count(data);
-		if (nov > *count)
-			nov = *count;
+		nov = vmin_t(size_t, pcre2_get_ovector_count(data), *count);
 		for (g = 0; g < nov; g++) {
 			b = ovector[2 * g];
 			e = ovector[2 * g + 1];
@@ -249,7 +238,6 @@ VRE_match(const vre_t *code, const char *subject, size_t length,
 
 	CHECK_OBJ_NOTNULL(code, VRE_MAGIC);
 	AN(subject);
-	AZ(options & (~VRE_MASK_MATCH));
 
 	if (length == 0)
 		length = PCRE2_ZERO_TERMINATED;
@@ -266,7 +254,6 @@ VRE_capture(const vre_t *code, const char *subject, size_t length, int options,
 
 	CHECK_OBJ_NOTNULL(code, VRE_MAGIC);
 	AN(subject);
-	AZ(options & (~VRE_MASK_MATCH));
 	AN(groups);
 	AN(count);
 

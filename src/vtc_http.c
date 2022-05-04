@@ -389,7 +389,7 @@ cmd_http_expect_pattern(CMD_ARGS)
 		if (*p != t)
 			vtc_fatal(hp->vl,
 			    "EXPECT PATTERN FAIL @%zd should 0x%02x is 0x%02x",
-			    p - hp->body, t, *p);
+			    (ssize_t) (p - hp->body), t, *p);
 		t += 1;
 		t &= ~0x08;
 	}
@@ -1426,9 +1426,7 @@ cmd_http_chunkedlen(CMD_ARGS)
 
 		VSB_printf(hp->vsb, "%x%s", len, nl);
 		for (u = 0; u < len; u += v) {
-			v = len - u;
-			if (v > sizeof buf)
-				v = sizeof buf;
+			v = vmin_t(unsigned, len - u, sizeof buf);
 			VSB_bcat(hp->vsb, buf, v);
 		}
 		VSB_printf(hp->vsb, "%s", nl);

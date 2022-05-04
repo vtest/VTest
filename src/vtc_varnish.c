@@ -699,7 +699,7 @@ varnish_wait(struct varnish *v)
 	/* Then stop it */
 	varnish_stop(v);
 
-	if (varnish_ask_cli(v, "panic.clear", NULL) != CLIS_CANT)
+	if (varnish_ask_cli(v, "panic.show", NULL) != CLIS_CANT)
 		vtc_fatal(v->vl, "Unexpected panic");
 
 	varnish_cleanup(v);
@@ -1076,7 +1076,7 @@ vsl_catchup(struct varnish *v)
  *
  * \-errvcl STRING1 STRING2
  *         Load STRING2 as VCL, expecting it to fail, and Varnish to send an
- *         error string matching STRING2
+ *         error string matching STRING1
  *
  * \-jail STRING
  *         Look at ``man varnishd`` (-j) for more information.

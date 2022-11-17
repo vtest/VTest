@@ -711,7 +711,7 @@ cmd_http_rxresp(CMD_ARGS)
 		return;
 	if (!hp->resp[0] || !hp->resp[1])
 		return;
-	if (hp->head_method)
+	if (hp->head_method || !strcmp(hp->resp[1], "304"))
 		return;
 	if (!strcmp(hp->resp[1], "200"))
 		http_swallow_body(hp, hp->resp, 1, 0);

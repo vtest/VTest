@@ -908,10 +908,14 @@ process_close(struct process *p)
  * Output from the stderr-pipe is copied verbatim to ${pNAME_err}, and
  * is always included in the vtc_log.
  *
- *	process pNAME SPEC [-log] [-dump] [-hexdump] [-expect-exit N]
- *		[-start] [-run]
- *		[-write STRING] [-writeln STRING]
- *		[-kill STRING] [-stop] [-wait] [-close]
+ *	process pNAME SPEC [-allow-core] [-expect-exit N] [-expect-signal N]
+ *		[-dump] [-hexdump] [-log]
+ *		[-run] [-close] [-kill SIGNAL] [-start] [-stop] [-wait]
+ *		[-write STRING] [-writeln STRING] [-writehex HEXSTRING]
+ *		[-need-bytes [+]NUMBER]
+ *		[-screen-dump] [-winsz LINES COLUMNSS] [-ansi-response]
+ *		[-expect-cursor LINE COLUMN] [-expect-text LINE COLUMN TEXT]
+ *		[-match-text LINE COLUMN REGEXP]
  *
  * pNAME
  *	Name of the process. It must start with 'p'.
@@ -934,6 +938,12 @@ process_close(struct process *p)
  * \-expect-exit N
  *	Expect exit status N
  *
+ * \-expect-signal N
+ *	Expect signal in exit status N
+ *
+ * \-allow-core
+ *	Core dump in exit status is OK
+ *
  * \-wait
  *	Wait for the process to finish.
  *
@@ -954,7 +964,12 @@ process_close(struct process *p)
  *	expression from either output, consider using it if you only need
  *	to match one.
  *
- * \-kill STRING
+ * \-key KEYSYM
+ *      Send emulated key-press.
+ *      KEYSYM can be one of (NPAGE, PPAGE, HOME, END)
+ *
+ *
+ * \-kill SIGNAL
  *	Send a signal to the process. The argument can be either
  *	the string "TERM", "INT", or "KILL" for SIGTERM, SIGINT or SIGKILL
  *	signals, respectively, or a hyphen (-) followed by the signal
@@ -970,7 +985,10 @@ process_close(struct process *p)
  * \-stop
  *	Shorthand for -kill TERM.
  *
- * \-winsz LIN COL
+ * \-close
+ *	Alias for "-kill HUP"
+ *
+ * \-winsz LINES COLUMNS
  *	Change the terminal window size to LIN lines and COL columns.
  *
  * \-write STRING
@@ -986,22 +1004,26 @@ process_close(struct process *p)
  *	Wait until at least NUMBER bytes have been received in total.
  *	If '+' is prefixed, NUMBER new bytes must be received.
  *
- * \-expect-text LIN COL PAT
- *	Wait for PAT to appear at LIN,COL on the virtual screen.
+ * \-ansi-response
+ *	Respond to terminal respond-back sequences
+ *
+ * \-expect-cursor LINE COLUMN
+ *	Expect cursors location
+ *
+ * \-expect-text LINE COLUMNS TEXT
+ *	Wait for TEXT to appear at LIN,COL on the virtual screen.
  *	Lines and columns are numbered 1...N
  *	LIN==0 means "on any line"
  *	COL==0 means "anywhere on the line"
  *
- * \-match-text LIN COL PAT
+ * \-match-text LINE COLUMN REGEXP
  *	Wait for the PAT regular expression to match the text at LIN,COL on the virtual screen.
  *	Lines and columns are numbered 1...N
  *	LIN==0 means "on any line"
  *	COL==0 means "anywhere on the line"
  *
- * \-close
- *	Alias for "-kill HUP"
  *
- * \-screen_dump
+ * \-screen-dump
  *	Dump the virtual screen into vtc_log
  *
  */
@@ -1081,6 +1103,19 @@ cmd_process(CMD_ARGS)
 				vtc_fatal(p->vl,
 				    "Cannot dump a running process");
 			p->log = 3;
+			continue;
+		}
+		if (!strcmp(*av, "-key")) {
+			if (!strcmp(av[1], "NPAGE"))
+				process_write(p, "\x1b\x5b\x36\x7e");
+			else if (!strcmp(av[1], "PPAGE"))
+				process_write(p, "\x1b\x5b\x35\x7e");
+			else if (!strcmp(av[1], "HOME"))
+				process_write(p, "\x1b\x4f\x48");
+			else if (!strcmp(av[1], "END"))
+				process_write(p, "\x1b\x4f\x46");
+			else
+				vtc_fatal(p->vl, "Unknown key %s", av[1]);
 			continue;
 		}
 		if (!strcmp(*av, "-kill")) {

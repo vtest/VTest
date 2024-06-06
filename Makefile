@@ -41,7 +41,6 @@ LIBS=	-L/usr/local/lib \
 
 vtest: ${DEPS} ${SRCS}
 	${MAKE} \
-		${MAKEFLAGS} \
 		 DEFINES= \
 		 `for s in $(SRCS); do echo $${s%.c}.o;done`
 
@@ -60,7 +59,6 @@ test: vtest
 
 varnishtest:	${DEPS} ${SRCS}
 	${MAKE} \
-		${MAKEFLAGS} \
 		 DEFINES="-DVTEST_WITH_VTC_VARNISH -DVTEST_WITH_VTC_LOGEXPECT" \
 		 `for s in $(SRCS); do echo $${s%.c}.o;done`
 

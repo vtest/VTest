@@ -10,6 +10,12 @@ If you want to join the fun, email me.
 
 Poul-Henning
 
+# Build Dependencies
+
+## Linux
+
+- libpcre2-dev
+
 # BACKGROUND CORRESPONDENCE
 
 `Date:    Wed, 09 Jan 2019 10:36:14 +0000`

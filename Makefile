@@ -1,6 +1,5 @@
 #
 
-PYTHON2	?=	python2
 PYTHON3	?=	python3
 PYTHON	?=	python
 
@@ -87,8 +86,6 @@ varnishtest:	${DEPS} ${SRCS}
 src/vtc_h2_dectbl.h:	src/huffman_gen.py src/tbl/vhp_huffman.h
 	@( echo trying python3 && \
 	${PYTHON3} src/huffman_gen.py src/tbl/vhp_huffman.h > $@ ) || \
-	( rm -f $@; echo trying python2 instead && \
-	${PYTHON2} src/huffman_gen.py src/tbl/vhp_huffman.h > $@ ) || \
 	( rm -f $@; echo trying python instead && \
 	${PYTHON} src/huffman_gen.py src/tbl/vhp_huffman.h > $@ ) || \
 	( rm -f $@; echo failed && exit 1 )

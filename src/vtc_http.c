@@ -1172,6 +1172,32 @@ cmd_http_rxchunk(CMD_ARGS)
  * Transmit a request
  */
 
+struct args {
+      char **argv;
+      int argc;
+};
+
+static void
+args_init(struct args *args)
+{
+	memset(args, 0, sizeof *args);
+}
+
+static void
+args_add(struct args *args, char *arg)
+{
+	AN(args);
+	args->argv = realloc(args->argv, (args->argc + 1) * sizeof *args->argv);
+	AN(args->argv);
+	args->argv[args->argc++] = arg;
+}
+
+static void
+args_free(struct args *args)
+{
+	free(args->argv);
+}
+
 static void
 cmd_http_txreq(CMD_ARGS)
 {
@@ -1180,6 +1206,7 @@ cmd_http_txreq(CMD_ARGS)
 	const char *url = "/";
 	const char *proto = "HTTP/1.1";
 	const char *up = NULL;
+	struct args args;
 	unsigned nohost;
 
 	(void)vl;
@@ -1189,6 +1216,7 @@ cmd_http_txreq(CMD_ARGS)
 	av++;
 
 	VSB_clear(hp->vsb);
+	args_init(&args);
 
 	hp->head_method = 0;
 	for (; *av != NULL; av++) {
@@ -1207,9 +1235,11 @@ cmd_http_txreq(CMD_ARGS)
 			up = av[1];
 			av++;
 		} else
-			break;
+			args_add(&args, *av);
 	}
 	VSB_printf(hp->vsb, "%s %s %s%s", req, url, proto, nl);
+
+	args_add(&args, NULL);
 
 	if (up)
 		VSB_printf(hp->vsb, "Connection: Upgrade, HTTP2-Settings%s"
@@ -1217,7 +1247,7 @@ cmd_http_txreq(CMD_ARGS)
 				"HTTP2-Settings: %s%s", nl, nl, up, nl);
 
 	nohost = strcmp(proto, "HTTP/1.1") != 0;
-	av = http_tx_parse_args(av, vl, hp, NULL, nohost);
+	av = http_tx_parse_args(args.argv, vl, hp, NULL, nohost);
 	if (*av != NULL)
 		vtc_fatal(hp->vl, "Unknown http txreq spec: %s\n", *av);
 	http_write(hp, 4, "txreq");
@@ -1241,6 +1271,7 @@ cmd_http_txreq(CMD_ARGS)
 		    "} -start\n"
 		);
 	}
+	args_free(&args);
 }
 
 /* SECTION: client-server.spec.recv

@@ -1,0 +1,44 @@
+vtest "test -nouseragent and -noserver"
+
+server s1  {
+	rxreq
+	# by default, User-Agent header is set to cNAME
+	expect req.http.User-Agent == "c101"
+	txresp
+	rxreq
+	# when specified with -hdr, it overrides the default
+	expect req.http.User-Agent == "not-c101"
+	txresp -hdr "Server: not-s1"
+} -start
+
+server s2  {
+	rxreq
+	expect req.http.User-Agent == "c202"
+	txresp
+	rxreq
+	# default User-Agent header is not included when -nouseragent is specified
+	expect req.http.foo == bar
+	expect req.http.User-Agent == <undef>
+	txresp -noserver
+} -start
+
+client c101 -connect ${s1_sock} {
+	txreq -url "/home"
+	rxresp
+	# by default, Server header is set to sNAME
+	expect resp.http.Server == "s1"
+	txreq  -url "/home" -hdr "User-Agent: not-c101"
+	rxresp
+	# when specified with -hdr, it overrides the default
+	expect resp.http.Server == "not-s1"
+} -run
+
+client c202 -connect ${s2_sock} {
+	txreq
+	rxresp
+	expect resp.http.Server == "s2"
+	txreq -hdr "foo: bar" -nouseragent
+	rxresp
+	# default Server header is not included when -noserver is specified
+	expect resp.http.Server == <undef>
+} -run
